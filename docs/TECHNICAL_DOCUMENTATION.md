@@ -841,7 +841,6 @@ standard_roles = [
 ```python
 # Custom permission query conditions
 permission_query_conditions = {
-    "Assistant Connection Log": "frappe_assistant_core.utils.permissions.get_permission_query_conditions",
     "Assistant Audit Log": "frappe_assistant_core.utils.permissions.get_audit_permission_query_conditions"
 }
 

@@ -252,11 +252,12 @@ def get_usage_statistics() -> Dict[str, Any]:
         today = frappe.utils.today()
         week_start = frappe.utils.add_days(today, -7)
         
-        # Connection statistics with error handling
+        # Connection statistics are no longer tracked (Assistant Connection Log removed)
+        # Using audit log activity as a proxy for connection activity
         try:
-            total_connections = frappe.db.count("Assistant Connection Log") or 0
-            today_connections = frappe.db.count("Assistant Connection Log", {"creation": (">=", today)}) or 0
-            week_connections = frappe.db.count("Assistant Connection Log", {"creation": (">=", week_start)}) or 0
+            total_connections = frappe.db.count("Assistant Audit Log") or 0
+            today_connections = frappe.db.count("Assistant Audit Log", {"creation": (">=", today)}) or 0
+            week_connections = frappe.db.count("Assistant Audit Log", {"creation": (">=", week_start)}) or 0
         except Exception as e:
             api_logger.warning(f"Connection stats error: {e}")
             total_connections = today_connections = week_connections = 0

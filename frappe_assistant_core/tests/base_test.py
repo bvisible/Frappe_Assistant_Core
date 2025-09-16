@@ -135,9 +135,7 @@ class BaseAssistantTest(unittest.TestCase):
         try:
             # Clear test documents if any were created
             test_doctypes = [
-                "Assistant Audit Log",
-                "Assistant Connection Log", 
-                "Assistant Tool Registry"
+                "Assistant Audit Log"
             ]
             
             for doctype in test_doctypes:
@@ -293,18 +291,7 @@ class BaseAssistantTest(unittest.TestCase):
         audit_doc.insert(ignore_permissions=True)
         return audit_doc
     
-    def create_test_connection_log(self, status="Connected"):
-        """Create a test connection log entry"""
-        conn_doc = frappe.get_doc({
-            "doctype": "Assistant Connection Log",
-            "connection_id": "TEST_CONN_123",
-            "user": self.test_user,
-            "protocol": "HTTP",
-            "status": status,
-            "ip_address": "127.0.0.1"
-        })
-        conn_doc.insert(ignore_permissions=True)
-        return conn_doc
+    # NOTE: create_test_connection_log method removed as Assistant Connection Log no longer exists
 
 class MockWebSocketConnection:
     """Mock WebSocket connection for testing"""

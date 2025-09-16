@@ -45,21 +45,7 @@ def get_roles(user: str) -> list:
     """Retrieve roles for the specified user."""
     return [role.role for role in get_doc("User", user).roles] if user else []
 
-def get_permission_query_conditions(user=None):
-    """Permission query conditions for assistant Connection Log"""
-    if not user:
-        user = frappe.session.user
-    
-    # System Manager and assistant Admin can see all logs
-    if "System Manager" in frappe.get_roles(user) or "assistant Admin" in frappe.get_roles(user):
-        return ""
-    
-    # assistant Users can only see their own connection logs
-    if "assistant User" in frappe.get_roles(user):
-        return f"`tabassistant Connection Log`.user = '{user}'"
-    
-    # No access for others
-    return "1=0"
+# NOTE: get_permission_query_conditions function removed as Assistant Connection Log no longer exists
 
 def get_audit_permission_query_conditions(user=None):
     """Permission query conditions for assistant Audit Log"""

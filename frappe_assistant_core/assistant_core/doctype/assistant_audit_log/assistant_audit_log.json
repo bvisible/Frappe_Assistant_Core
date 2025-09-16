@@ -1,9 +1,8 @@
 {
  "actions": [],
- "allow_copy": 0,
  "autoname": "naming_series:",
- "default_view": "List",
  "creation": "2025-06-21 22:45:07.030425",
+ "default_view": "List",
  "doctype": "DocType",
  "document_type": "Document",
  "editable_grid": 1,
@@ -97,16 +96,15 @@
   },
   {
    "fieldname": "target_doctype",
-   "fieldtype": "Link",
+   "fieldtype": "Data",
    "label": "Target DocType",
    "options": "DocType",
    "read_only": 1
   },
   {
    "fieldname": "target_name",
-   "fieldtype": "Dynamic Link",
+   "fieldtype": "Data",
    "label": "Target Document",
-   "options": "target_doctype",
    "read_only": 1
   },
   {
@@ -153,10 +151,11 @@
   }
  ],
  "links": [],
- "modified": "2025-08-06 18:15:28.901145",
+ "modified": "2025-09-09 16:49:34.747302",
  "modified_by": "Administrator",
  "module": "Assistant Core",
  "name": "Assistant Audit Log",
+ "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
   {
@@ -176,6 +175,7 @@
    "role": "Auditor"
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []

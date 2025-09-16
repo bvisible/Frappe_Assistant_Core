@@ -52,17 +52,7 @@ class AssistantCoreSettings(Document):
             server = assistantServer()
             server.enable()
             
-            # Log the API enable (skip if DocType doesn't exist)
-            try:
-                if frappe.db.table_exists("tabAssistant Connection Log"):
-                    frappe.get_doc({
-                        "doctype": "Assistant Connection Log",
-                        "action": "api_enabled",
-                        "user": frappe.session.user,
-                        "details": "assistant MCP API enabled"
-                    }).insert(ignore_permissions=True)
-            except:
-                pass  # Don't fail API enable if logging fails
+            # Connection logging removed - using audit log for action tracking
             
         except Exception as e:
             frappe.log_error(f"Failed to enable assistant MCP API: {str(e)}")
@@ -74,17 +64,7 @@ class AssistantCoreSettings(Document):
             server = assistantServer()
             server.disable()
             
-            # Log the API disable (skip if DocType doesn't exist)
-            try:
-                if frappe.db.table_exists("tabAssistant Connection Log"):
-                    frappe.get_doc({
-                        "doctype": "Assistant Connection Log",
-                        "action": "api_disabled",
-                        "user": frappe.session.user,
-                        "details": "assistant MCP API disabled"
-                    }).insert(ignore_permissions=True)
-            except:
-                pass  # Don't fail API disable if logging fails
+            # Connection logging removed - using audit log for action tracking
             
         except Exception as e:
             frappe.log_error(f"Failed to disable assistant MCP API: {str(e)}")

@@ -105,7 +105,6 @@ after_uninstall = "frappe_assistant_core.utils.migration_hooks.after_uninstall"
 # Permissions evaluated in scripted ways
 
 permission_query_conditions = {
-    "Assistant Connection Log": "frappe_assistant_core.utils.permissions.get_permission_query_conditions",
     "Assistant Audit Log": "frappe_assistant_core.utils.permissions.get_audit_permission_query_conditions"
 }
 
@@ -133,9 +132,6 @@ doc_events = {
     },
     "Assistant Core Settings": {
         "on_update": "frappe_assistant_core.utils.cache.invalidate_settings_cache"
-    },
-    "Assistant Connection Log": {
-        "after_insert": "frappe_assistant_core.utils.cache.invalidate_dashboard_cache"
     },
     "Assistant Audit Log": {
         "after_insert": "frappe_assistant_core.utils.cache.invalidate_dashboard_cache"

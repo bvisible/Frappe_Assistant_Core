@@ -137,10 +137,8 @@ def get_system_health_check():
     try:
         # Check 1: DocTypes exist and are properly configured
         required_doctypes = [
-            "assistant Server Settings",
-            "assistant Tool Registry", 
-            "assistant Connection Log",
-            "assistant Audit Log"
+            "Assistant Core Settings",
+            "Assistant Audit Log"
         ]
         
         for doctype in required_doctypes:
@@ -173,28 +171,28 @@ def get_system_health_check():
             enabled_tools = frappe.db.count("assistant Tool Registry", filters={"enabled": 1})
             health_status["checks"].append(f"{enabled_tools} of {tool_count} tools enabled")
         
-        # Check 4: Recent connection issues
-        recent_errors = frappe.db.count("assistant Connection Log", 
+        # Check 4: Recent connection issues (using audit log as proxy)
+        recent_errors = frappe.db.count("Assistant Audit Log", 
                                        filters={
                                            "status": "Error",
                                            "creation": [">=", today()]
                                        })
         
         if recent_errors > 10:
-            health_status["warnings"].append(f"High number of connection errors today: {recent_errors}")
+            health_status["warnings"].append(f"High number of tool errors today: {recent_errors}")
         elif recent_errors > 0:
-            health_status["checks"].append(f"Minor connection issues: {recent_errors} errors today")
+            health_status["checks"].append(f"Minor tool issues: {recent_errors} errors today")
         else:
-            health_status["checks"].append("No connection errors today")
+            health_status["checks"].append("No tool errors today")
         
         # Check 5: Tool execution health
-        failed_executions = frappe.db.count("assistant Audit Log",
+        failed_executions = frappe.db.count("Assistant Audit Log",
                                            filters={
                                                "status": ["in", ["Error", "Timeout"]],
                                                "creation": [">=", today()]
                                            })
         
-        total_executions = frappe.db.count("assistant Audit Log",
+        total_executions = frappe.db.count("Assistant Audit Log",
                                           filters={"creation": [">=", today()]})
         
         if total_executions > 0:
@@ -229,16 +227,10 @@ def cleanup_old_data():
         # Default to 30 days for log cleanup
         cleanup_days = 30
         
-        # Clean connection logs
-        old_connection_logs = frappe.db.sql("""
-            DELETE FROM `tabassistant Connection Log`
-            WHERE creation < DATE_SUB(NOW(), INTERVAL %s DAY)
-        """, (cleanup_days,))
-        
-        # Clean audit logs (keep longer for compliance)
+        # Clean audit logs only (connection logs no longer exist)
         audit_cleanup_days = cleanup_days * 2
         old_audit_logs = frappe.db.sql("""
-            DELETE FROM `tabassistant Audit Log`
+            DELETE FROM `tabAssistant Audit Log`
             WHERE creation < DATE_SUB(NOW(), INTERVAL %s DAY)
         """, (audit_cleanup_days,))
         
@@ -246,8 +238,7 @@ def cleanup_old_data():
         
         return {
             "success": True,
-            "message": f"Cleaned up logs older than {cleanup_days} days",
-            "connection_logs_deleted": old_connection_logs,
+            "message": f"Cleaned up audit logs older than {audit_cleanup_days} days",
             "audit_logs_deleted": old_audit_logs
         }
         
