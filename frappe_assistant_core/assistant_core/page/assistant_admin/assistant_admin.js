@@ -236,7 +236,7 @@ frappe.pages['assistant-admin'].on_page_load = function(wrapper) {
                     const statusCard = $('#status-card');
                     const statusIcon = $('#status-icon');
                     const statusText = $('#status-text');
-                    
+
                     if (status.enabled) {
                         statusCard.removeClass('disabled').addClass('enabled');
                         statusIcon.removeClass('red').addClass('green');
@@ -265,7 +265,7 @@ frappe.pages['assistant-admin'].on_page_load = function(wrapper) {
                         <div class="info-stat">${stats.enabled_count || 0}</div>
                         <div class="info-detail">${stats.enabled_count} enabled / ${stats.total_count} total</div>
                     `);
-                    
+
                     frappe.call({
                         method: "frappe_assistant_core.api.admin_api.get_tool_stats",
                         callback: function(toolResponse) {
@@ -389,7 +389,7 @@ frappe.pages['assistant-admin'].on_page_load = function(wrapper) {
     loadPluginInfo();
     loadToolRegistry();
     loadRecentActivity();
-    
+
     // Refresh every 30 seconds
     setInterval(function() {
         loadAssistantStatus();

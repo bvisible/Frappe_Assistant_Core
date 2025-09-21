@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -49,22 +48,19 @@ SETTINGS_CACHE_KEY = "assistant_settings"
 PERFORMANCE_CACHE_KEY = "assistant_metrics"
 
 # Plugin System Constants
-PLUGIN_DISCOVERY_PATHS = [
-    "frappe_assistant_core.plugins",
-    "plugins"
-]
+PLUGIN_DISCOVERY_PATHS = ["frappe_assistant_core.plugins", "plugins"]
 MAX_PLUGIN_LOAD_TIME = 30  # seconds
 PLUGIN_CONFIG_VALIDATION_TIMEOUT = 10  # seconds
 
 # Tool Categories
 TOOL_CATEGORIES = {
     "DOCUMENT": "document",
-    "SEARCH": "search", 
+    "SEARCH": "search",
     "METADATA": "metadata",
     "REPORT": "report",
     "WORKFLOW": "workflow",
     "DATA_SCIENCE": "data_science",
-    "CUSTOM": "custom"
+    "CUSTOM": "custom",
 }
 
 # Core Tool Names
@@ -77,26 +73,22 @@ CORE_TOOLS = {
     "DOCUMENT_LIST": "document_list",
     "DOCUMENT_BULK_CREATE": "document_bulk_create",
     "DOCUMENT_BULK_UPDATE": "document_bulk_update",
-    
     # Search tools
     "SEARCH_GLOBAL": "search_global",
     "SEARCH_DOCTYPE": "search_doctype",
     "SEARCH_LINK": "search_link",
-    
     # Metadata tools
     "METADATA_DOCTYPE": "metadata_doctype",
     "METADATA_LIST_DOCTYPES": "list_doctypes",
     "METADATA_DOCTYPE_FIELDS": "metadata_doctype_fields",
-    
     # Report tools
     "REPORT_EXECUTE": "report_execute",
     "REPORT_LIST": "report_list",
     "REPORT_DETAILS": "report_details",
-    
     # Workflow tools
     "WORKFLOW_ACTION": "workflow_action",
     "WORKFLOW_STATUS": "workflow_status",
-    "WORKFLOW_LIST": "workflow_list"
+    "WORKFLOW_LIST": "workflow_list",
 }
 
 # Plugin Tool Names
@@ -105,7 +97,7 @@ PLUGIN_TOOLS = {
     "EXECUTE_PYTHON_CODE": "execute_python_code",
     "ANALYZE_FRAPPE_DATA": "analyze_frappe_data",
     "QUERY_AND_ANALYZE": "query_and_analyze",
-    "CREATE_VISUALIZATION": "create_visualization"
+    "CREATE_VISUALIZATION": "create_visualization",
 }
 
 # Error Codes
@@ -116,7 +108,6 @@ ERROR_CODES = {
     "METHOD_NOT_FOUND": -32601,
     "INVALID_PARAMS": -32602,
     "INTERNAL_ERROR": -32603,
-    
     # Custom application errors
     "PERMISSION_DENIED": -32001,
     "TOOL_NOT_FOUND": -32002,
@@ -125,7 +116,7 @@ ERROR_CODES = {
     "TIMEOUT_ERROR": -32005,
     "PLUGIN_ERROR": -32006,
     "CONFIGURATION_ERROR": -32007,
-    "DEPENDENCY_ERROR": -32008
+    "DEPENDENCY_ERROR": -32008,
 }
 
 # HTTP Status Codes
@@ -140,7 +131,7 @@ HTTP_STATUS = {
     "PAYLOAD_TOO_LARGE": 413,
     "TOO_MANY_REQUESTS": 429,
     "INTERNAL_SERVER_ERROR": 500,
-    "SERVICE_UNAVAILABLE": 503
+    "SERVICE_UNAVAILABLE": 503,
 }
 
 # Logging Levels
@@ -149,7 +140,7 @@ LOG_LEVELS = {
     "INFO": "info",
     "WARNING": "warning",
     "ERROR": "error",
-    "CRITICAL": "critical"
+    "CRITICAL": "critical",
 }
 
 # Performance Monitoring
@@ -159,7 +150,7 @@ PERFORMANCE_METRICS = {
     "CACHE_HIT_RATE": "cache_hit_rate",
     "ERROR_RATE": "error_rate",
     "CONCURRENT_REQUESTS": "concurrent_requests",
-    "MEMORY_USAGE": "memory_usage"
+    "MEMORY_USAGE": "memory_usage",
 }
 
 # Data Science Constants
@@ -169,15 +160,27 @@ DATA_SCIENCE_LIMITS = {
     "MAX_CODE_EXECUTION_TIME": 60,
     "MAX_MEMORY_USAGE": 512 * 1024 * 1024,  # 512MB
     "ALLOWED_LIBRARIES": [
-        "pandas", "numpy", "matplotlib", "seaborn", 
-        "plotly", "scipy", "sklearn", "statsmodels"
+        "pandas",
+        "numpy",
+        "matplotlib",
+        "seaborn",
+        "plotly",
+        "scipy",
+        "sklearn",
+        "statsmodels",
     ],
     "RESTRICTED_MODULES": [
-        "os", "sys", "subprocess", "socket", "urllib",
-        "requests", "http", "ftplib", "smtplib"
-    ]
+        "os",
+        "sys",
+        "subprocess",
+        "socket",
+        "urllib",
+        "requests",
+        "http",
+        "ftplib",
+        "smtplib",
+    ],
 }
-
 
 
 # Security Constants
@@ -187,22 +190,15 @@ SECURITY_CONFIG = {
     "SESSION_TIMEOUT": 86400,  # 24 hours
     "API_RATE_LIMIT": 60,  # requests per minute
     "MAX_REQUEST_RETRIES": 3,
-    "ALLOWED_CONTENT_TYPES": [
-        "application/json",
-        "text/plain",
-        "multipart/form-data"
-    ]
+    "ALLOWED_CONTENT_TYPES": ["application/json", "text/plain", "multipart/form-data"],
 }
 
 # File Processing Constants
 FILE_PROCESSING = {
     "MAX_FILE_SIZE": 50 * 1024 * 1024,  # 50MB
-    "ALLOWED_EXTENSIONS": [
-        ".json", ".csv", ".xlsx", ".txt", ".pdf",
-        ".png", ".jpg", ".jpeg", ".gif", ".svg"
-    ],
+    "ALLOWED_EXTENSIONS": [".json", ".csv", ".xlsx", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg"],
     "TEMP_FILE_CLEANUP_HOURS": 24,
-    "MAX_CONCURRENT_UPLOADS": 5
+    "MAX_CONCURRENT_UPLOADS": 5,
 }
 
 # Database Query Constants
@@ -212,7 +208,7 @@ DATABASE_LIMITS = {
     "MAX_FETCH_SIZE": 10000,
     "QUERY_TIMEOUT": 300,  # 5 minutes
     "MAX_JOIN_TABLES": 10,
-    "MAX_WHERE_CONDITIONS": 20
+    "MAX_WHERE_CONDITIONS": 20,
 }
 
 # API Endpoint Paths
@@ -221,7 +217,7 @@ API_ENDPOINTS = {
     "PLUGIN_MANAGEMENT": "/api/method/frappe_assistant_core.api.plugin_api",
     "ADMIN_ENDPOINTS": "/api/method/frappe_assistant_core.api.admin",
     "HEALTH_CHECK": "/api/method/frappe_assistant_core.api.health",
-    "WEBSOCKET_ENDPOINT": "/ws/assistant"
+    "WEBSOCKET_ENDPOINT": "/ws/assistant",
 }
 
 # Plugin Status Values
@@ -231,7 +227,7 @@ PLUGIN_STATUS = {
     "DISABLED": "disabled",
     "ERROR": "error",
     "LOADING": "loading",
-    "UNLOADING": "unloading"
+    "UNLOADING": "unloading",
 }
 
 # Tool Status Values
@@ -240,23 +236,14 @@ TOOL_STATUS = {
     "EXECUTING": "executing",
     "ERROR": "error",
     "TIMEOUT": "timeout",
-    "DISABLED": "disabled"
+    "DISABLED": "disabled",
 }
 
 # MCP Content Types
-MCP_CONTENT_TYPES = {
-    "TEXT": "text",
-    "IMAGE": "image",
-    "RESOURCE": "resource"
-}
+MCP_CONTENT_TYPES = {"TEXT": "text", "IMAGE": "image", "RESOURCE": "resource"}
 
 # System Health Status
-HEALTH_STATUS = {
-    "HEALTHY": "healthy",
-    "DEGRADED": "degraded", 
-    "UNHEALTHY": "unhealthy",
-    "UNKNOWN": "unknown"
-}
+HEALTH_STATUS = {"HEALTHY": "healthy", "DEGRADED": "degraded", "UNHEALTHY": "unhealthy", "UNKNOWN": "unknown"}
 
 # Feature Flags
 FEATURE_FLAGS = {
@@ -266,7 +253,7 @@ FEATURE_FLAGS = {
     "ENABLE_ASYNC_TOOLS": False,
     "ENABLE_TOOL_CHAINING": False,
     "ENABLE_CUSTOM_VALIDATORS": True,
-    "ENABLE_PLUGIN_SANDBOXING": True
+    "ENABLE_PLUGIN_SANDBOXING": True,
 }
 
 # Default Settings
@@ -281,7 +268,7 @@ DEFAULT_SETTINGS = {
     "enable_detailed_audit": False,
     "max_concurrent_requests": 10,
     "enable_rate_limiting": True,
-    "rate_limit_per_minute": 60
+    "rate_limit_per_minute": 60,
 }
 
 # Validation Patterns
@@ -292,7 +279,7 @@ VALIDATION_PATTERNS = {
     "EMAIL": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
     "URL": r"^https?://[^\s/$.?#].[^\s]*$",
     "DOCTYPE_NAME": r"^[A-Z][A-Za-z0-9\s]*$",
-    "FIELD_NAME": r"^[a-z][a-z0-9_]*$"
+    "FIELD_NAME": r"^[a-z][a-z0-9_]*$",
 }
 
 # Message Templates
@@ -305,7 +292,7 @@ MESSAGE_TEMPLATES = {
     "VALIDATION_ERROR": "Validation failed for '{field}': {error}",
     "PERMISSION_DENIED": "Insufficient permissions to access '{resource}'",
     "TIMEOUT_ERROR": "Operation timed out after {timeout} seconds",
-    "RATE_LIMIT_EXCEEDED": "Rate limit exceeded. Try again in {retry_after} seconds"
+    "RATE_LIMIT_EXCEEDED": "Rate limit exceeded. Try again in {retry_after} seconds",
 }
 
 # Environment Variables
@@ -315,5 +302,5 @@ ENV_VARS = {
     "FRAPPE_ASSISTANT_CACHE_TTL": "FRAPPE_ASSISTANT_CACHE_TTL",
     "FRAPPE_ASSISTANT_MAX_REQUESTS": "FRAPPE_ASSISTANT_MAX_REQUESTS",
     "FRAPPE_ASSISTANT_TIMEOUT": "FRAPPE_ASSISTANT_TIMEOUT",
-    "FRAPPE_ASSISTANT_PLUGIN_PATH": "FRAPPE_ASSISTANT_PLUGIN_PATH"
+    "FRAPPE_ASSISTANT_PLUGIN_PATH": "FRAPPE_ASSISTANT_PLUGIN_PATH",
 }

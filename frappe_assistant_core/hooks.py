@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -62,7 +61,7 @@ app_version = app_version
 
 # website user home page (by Role)
 # role_home_page = {
-#	"Role": "home_page"
+# "Role": "home_page"
 # }
 
 # Generators
@@ -78,7 +77,7 @@ app_version = app_version
 jenv = {
     "methods": [
         "frappe_assistant_core.utils.template_helpers.get_assistant_status",
-        "frappe_assistant_core.utils.template_helpers.get_tool_count"
+        "frappe_assistant_core.utils.template_helpers.get_tool_count",
     ]
 }
 
@@ -109,7 +108,7 @@ permission_query_conditions = {
 }
 
 # has_permission = {
-#	"Event": "frappe.desk.doctype.event.event.has_permission",
+# "Event": "frappe.desk.doctype.event.event.has_permission",
 # }
 
 # DocType Class
@@ -117,7 +116,7 @@ permission_query_conditions = {
 # Override standard doctype classes
 
 # override_doctype_class = {
-#	"ToDo": "custom_app.overrides.CustomToDo"
+# "ToDo": "custom_app.overrides.CustomToDo"
 # }
 
 # Document Events
@@ -128,14 +127,10 @@ doc_events = {
     "*": {
         "on_update": "frappe_assistant_core.utils.audit_trail.log_document_change",
         "on_submit": "frappe_assistant_core.utils.audit_trail.log_document_submit",
-        "on_cancel": "frappe_assistant_core.utils.audit_trail.log_document_cancel"
+        "on_cancel": "frappe_assistant_core.utils.audit_trail.log_document_cancel",
     },
-    "Assistant Core Settings": {
-        "on_update": "frappe_assistant_core.utils.cache.invalidate_settings_cache"
-    },
-    "Assistant Audit Log": {
-        "after_insert": "frappe_assistant_core.utils.cache.invalidate_dashboard_cache"
-    }
+    "Assistant Core Settings": {"on_update": "frappe_assistant_core.utils.cache.invalidate_settings_cache"},
+    "Assistant Audit Log": {"after_insert": "frappe_assistant_core.utils.cache.invalidate_dashboard_cache"},
 }
 
 # Scheduled Tasks
@@ -143,12 +138,8 @@ doc_events = {
 
 scheduler_events = {
     "cron": {
-        "0 0 * * *": [
-            "frappe_assistant_core.assistant_core.server.cleanup_old_logs"
-        ],
-        "*/30 * * * *": [
-            "frappe_assistant_core.utils.cache.warm_cache"
-        ]
+        "0 0 * * *": ["frappe_assistant_core.assistant_core.server.cleanup_old_logs"],
+        "*/30 * * * *": ["frappe_assistant_core.utils.cache.warm_cache"],
     },
     # Hourly tasks removed - no longer needed after Assistant Connection Log removal
 }
@@ -162,14 +153,14 @@ scheduler_events = {
 # ------------------------------
 #
 # override_whitelisted_methods = {
-#	"frappe.desk.doctype.event.event.get_events": "frappe_assistant_core.event.get_events"
+# "frappe.desk.doctype.event.event.get_events": "frappe_assistant_core.event.get_events"
 # }
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
 # along with any modifications made in other Frappe apps
 # override_doctype_dashboards = {
-#	"Task": "frappe_assistant_core.task.get_dashboard_data"
+# "Task": "frappe_assistant_core.task.get_dashboard_data"
 # }
 
 # exempt linked doctypes from being automatically cancelled
@@ -186,31 +177,31 @@ scheduler_events = {
 # --------------------
 
 # user_data_fields = [
-#	{
-#		"doctype": "{doctype_1}",
-#		"filter_by": "{filter_by}",
-#		"redact_fields": ["{field_1}", "{field_2}"],
-#		"partial": 1,
-#	},
-#	{
-#		"doctype": "{doctype_2}",
-#		"filter_by": "{filter_by}",
-#		"partial": 1,
-#	},
-#	{
-#		"doctype": "{doctype_3}",
-#		"strict": False,
-#	},
-#	{
-#		"doctype": "{doctype_4}"
-#	}
+# {
+# "doctype": "{doctype_1}",
+# "filter_by": "{filter_by}",
+# "redact_fields": ["{field_1}", "{field_2}"],
+# "partial": 1,
+# },
+# {
+# "doctype": "{doctype_2}",
+# "filter_by": "{filter_by}",
+# "partial": 1,
+# },
+# {
+# "doctype": "{doctype_3}",
+# "strict": False,
+# },
+# {
+# "doctype": "{doctype_4}"
+# }
 # ]
 
 # Authentication and authorization
 # --------------------------------
 
 # auth_hooks = [
-#	"frappe_assistant_core.auth.validate"
+# "frappe_assistant_core.auth.validate"
 # ]
 
 # Automatically update python controller files with type annotations for DocTypes
@@ -218,7 +209,7 @@ scheduler_events = {
 # export_python_type_annotations = True
 
 # default_log_clearing_doctypes = {
-#	"Logging DocType Name": 30  # days to retain logs
+# "Logging DocType Name": 30  # days to retain logs
 # }
 
 # Standard Roles
@@ -226,7 +217,7 @@ scheduler_events = {
 
 standard_roles = [
     {"role": "Assistant User", "role_color": "#3498db"},
-    {"role": "Assistant Admin", "role_color": "#e74c3c"}
+    {"role": "Assistant Admin", "role_color": "#e74c3c"},
 ]
 
 # Boot
@@ -241,26 +232,15 @@ app_startup = "frappe_assistant_core.startup.startup"
 before_migrate = "frappe_assistant_core.utils.migration_hooks.before_migrate"
 after_migrate = [
     "frappe_assistant_core.startup.startup",
-    "frappe_assistant_core.utils.migration_hooks.after_migrate"
+    "frappe_assistant_core.utils.migration_hooks.after_migrate",
 ]
 
 # Fixtures
 # --------
 
 fixtures = [
-    {
-        "doctype": "Custom Field",
-        "filters": {
-            "dt": "User",
-            "fieldname": ["in", ["assistant_enabled"]]
-        }
-    },
-    {
-        "doctype": "Role",
-        "filters": {
-            "role_name": ["in", ["Assistant User", "Assistant Admin"]]
-        }
-    }
+    {"doctype": "Custom Field", "filters": {"dt": "User", "fieldname": ["in", ["assistant_enabled"]]}},
+    {"doctype": "Role", "filters": {"role_name": ["in", ["Assistant User", "Assistant Admin"]]}},
 ]
 
 # Enhanced Plugin Architecture

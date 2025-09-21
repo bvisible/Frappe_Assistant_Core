@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -21,6 +20,7 @@ Removes workarounds and provides proper initialization flow.
 """
 
 import frappe
+
 from frappe_assistant_core.utils.logger import api_logger
 
 
@@ -29,13 +29,14 @@ def startup():
     try:
         # Initialize plugin manager - this automatically loads enabled plugins from settings
         initialize_plugin_system()
-        
+
         # Initialize assistant server if enabled
         settings = frappe.get_single("Assistant Core Settings")
         if settings and settings.server_enabled:
             from frappe_assistant_core.assistant_core.server import start_server
+
             start_server()
-            
+
     except Exception as e:
         api_logger.debug(f"Startup error (non-critical): {e}")
 
@@ -44,19 +45,19 @@ def initialize_plugin_system():
     """Initialize the plugin system with clean architecture"""
     try:
         from frappe_assistant_core.utils.plugin_manager import get_plugin_manager
-        
+
         # Get plugin manager - this automatically initializes and loads enabled plugins
         plugin_manager = get_plugin_manager()
-        
+
         # Get stats for logging
         enabled_plugins = plugin_manager.get_enabled_plugins()
         available_tools = plugin_manager.get_all_tools()
-        
+
         api_logger.info(
             f"Plugin system initialized: {len(enabled_plugins)} plugins enabled, "
             f"{len(available_tools)} tools available"
         )
-        
+
     except Exception as e:
         api_logger.error(f"Failed to initialize plugin system: {e}")
 

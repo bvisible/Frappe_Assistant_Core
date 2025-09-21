@@ -166,3 +166,6 @@ ignore = [
     "F401",  # imported but unused
     "F841",  # local variable assigned but never used
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"frappe_assistant_core/plugins/base_plugin.py" = ["B027"]

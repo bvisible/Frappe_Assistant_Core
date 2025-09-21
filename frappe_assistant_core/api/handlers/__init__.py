@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -21,13 +20,13 @@ Modular organization for better maintainability
 """
 
 from .initialize import handle_initialize
-from .tools import handle_tools_list, handle_tool_call
-from .prompts import handle_prompts_list, handle_prompts_get
+from .prompts import handle_prompts_get, handle_prompts_list
+from .tools import handle_tool_call, handle_tools_list
 
 __all__ = [
     "handle_initialize",
-    "handle_tools_list", 
+    "handle_tools_list",
     "handle_tool_call",
     "handle_prompts_list",
-    "handle_prompts_get"
+    "handle_prompts_get",
 ]

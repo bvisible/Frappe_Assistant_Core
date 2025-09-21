@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -25,6 +24,7 @@ MCP_PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "Frappe Assistant Core MCP Server"
 SERVER_VERSION = "2.0.1"
 
+
 # API Error Codes
 class ErrorCodes:
     PARSE_ERROR = -32700
@@ -33,6 +33,7 @@ class ErrorCodes:
     INVALID_PARAMS = -32602
     INTERNAL_ERROR = -32603
     AUTHENTICATION_REQUIRED = -32000
+
 
 # Tool Categories
 class ToolCategories:
@@ -43,6 +44,7 @@ class ToolCategories:
     METADATA = "metadata"
     VISUALIZATION = "visualization"
 
+
 # Analysis Tool Thresholds
 class AnalysisThresholds:
     SMALL_OUTPUT_LINES = 20
@@ -51,19 +53,20 @@ class AnalysisThresholds:
     MEDIUM_OUTPUT_LINES = 10
     MEDIUM_VARIABLE_COUNT = 8
 
+
 # Streaming Messages - Updated to use settings-driven configuration
 class StreamingMessages:
     """
     Streaming messages that now use settings-driven configuration.
     Provides fallback messages if streaming manager is unavailable.
     """
-    
+
     @staticmethod
     def get_tool_prefix(tool_name: str = "") -> str:
         """Get tool prefix message based on settings"""
         try:
             from frappe_assistant_core.utils.streaming_manager import get_streaming_manager
-            
+
             streaming_manager = get_streaming_manager()
             return streaming_manager.get_tool_description_suffix(tool_name)
         except Exception:
@@ -71,7 +74,7 @@ class StreamingMessages:
 
 💡 SUGGESTION: For complex multi-step analysis, consider creating workspace artifacts to:
 • Prevent response limits during extensive analysis
-• Build comprehensive reports with unlimited depth  
+• Build comprehensive reports with unlimited depth
 • Create professional deliverables for stakeholders
 • Preserve analysis history across sessions
 
@@ -82,10 +85,10 @@ This tool works perfectly in responses AND artifacts - use artifacts for unlimit
         """Get system instructions based on settings"""
         try:
             from frappe_assistant_core.utils.streaming_manager import get_streaming_manager
-            
+
             streaming_manager = get_streaming_manager()
             custom_instructions = streaming_manager.get_custom_instructions()
-            
+
             if streaming_manager.should_enforce_streaming():
                 return f"""🔄 FRAPPE ARTIFACT STREAMING PROTOCOL - ENFORCED BY ADMINISTRATOR
 
@@ -148,10 +151,10 @@ Please check Assistant Core Settings for streaming configuration."""
         """Get artifact creation prompt based on settings"""
         try:
             from frappe_assistant_core.utils.streaming_manager import get_streaming_manager
-            
+
             streaming_manager = get_streaming_manager()
             custom_instructions = streaming_manager.get_custom_instructions()
-            
+
             if streaming_manager.should_enforce_streaming():
                 return f"""I'll create a comprehensive analysis artifact as required by administrator configuration.
 
@@ -173,24 +176,24 @@ This provides professional deliverables and prevents response limits."""
     @classmethod
     def _get_legacy_tool_prefix(cls):
         return cls.get_tool_prefix()
-    
-    @classmethod  
+
+    @classmethod
     def _get_legacy_system_instructions(cls):
         return cls.get_system_instructions()
-    
+
     @classmethod
     def _get_legacy_artifact_creation_prompt(cls):
         return cls.get_artifact_creation_prompt()
-    
+
     # Dynamic properties for legacy compatibility
     @property
     def TOOL_PREFIX(self):
         return self._get_legacy_tool_prefix()
-    
+
     @property
     def SYSTEM_INSTRUCTIONS(self):
         return self._get_legacy_system_instructions()
-    
+
     @property
     def ARTIFACT_CREATION_PROMPT(self):
         return self._get_legacy_artifact_creation_prompt()
@@ -200,6 +203,7 @@ This provides professional deliverables and prevents response limits."""
 ---
 
 💡 **ARTIFACT TIP:** For larger analyses (>20 lines output), results will auto-stream to artifacts for unlimited depth."""
+
 
 # Error Messages
 class ErrorMessages:
@@ -216,6 +220,7 @@ class ErrorMessages:
     PARSE_ERROR = "Invalid JSON received"
     INTERNAL_ERROR = "Internal error"
 
+
 # Log Messages
 class LogMessages:
     API_AUTHENTICATED = "Assistant API authenticated user: {}"
@@ -229,14 +234,16 @@ class LogMessages:
     FORCE_LOADING = "FORCING manual tool loading..."
     FORCE_IMPORT_SUCCESS = "FORCE: AnalysisTools imported successfully"
     FORCE_LOADING_COMPLETE = "FORCE: Manual loading complete. Total manual tools: {}"
-    
+
+
 # Success Messages
 class SuccessMessages:
     ANALYSIS_COMPLETED = "Analysis completed successfully"
     TOOLS_LOADED = "Loaded {} {} tools"
     ARTIFACT_CREATED = "Analysis results formatted for artifact creation"
     SERVER_STARTED = "Assistant Server started successfully"
-    
+
+
 # Tool Descriptions
 class ToolDescriptions:
     EXECUTE_PYTHON_CODE = """Execute custom Python code for advanced data analysis, calculations, and business logic with full access to Frappe framework and extensive library ecosystem.
@@ -247,7 +254,7 @@ class ToolDescriptions:
 
 **Core Data Science (Pre-loaded):**
 • pandas (as 'pd') - DataFrames, data manipulation, analysis
-• numpy (as 'np') - Arrays, mathematical operations, linear algebra  
+• numpy (as 'np') - Arrays, mathematical operations, linear algebra
 • matplotlib (as 'plt') - Plotting and visualization
 • seaborn (as 'sns') - Statistical data visualization
 
@@ -281,7 +288,7 @@ class ToolDescriptions:
 
 **Frappe API Access:**
 • frappe.get_all(doctype, **kwargs) - Query documents
-• frappe.get_doc(doctype, name) - Get single document  
+• frappe.get_doc(doctype, name) - Get single document
 • frappe.get_value(doctype, filters, fieldname) - Get field value
 • frappe.session.user - Current user info
 
@@ -324,6 +331,7 @@ print("Available variables:", list(locals().keys()))
     CREATE_VISUALIZATION = """Create interactive charts and visualizations from Frappe business data. Charts are displayed inline and saved as files.
 
 💡 ARTIFACT TIP: Document visualization workflows in artifacts for comprehensive reporting."""
+
 
 # Prompt Templates
 class PromptTemplates:
@@ -411,6 +419,7 @@ This analysis must be executed in a workspace artifact to:
 
 Please create an artifact workspace and perform this analysis using the execute_python_code tool with the full ecosystem of available libraries (pandas, numpy, matplotlib, seaborn, etc.)."""
 
+
 # Configuration
 class Config:
     DEFAULT_PORT = 8000
@@ -418,7 +427,7 @@ class Config:
     DEFAULT_LIMIT = 20
     MAX_RETRIES = 3
     CLEANUP_DAYS = 30
-    
+
     # Analysis tool defaults
     DEFAULT_DATA_LIMIT = 1000
     PREVIEW_LINES = 8

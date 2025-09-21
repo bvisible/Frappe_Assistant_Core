@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -20,71 +19,57 @@ Search DocType Tool for Core Plugin.
 Search within a specific DocType with permission-aware results.
 """
 
+from typing import Any, Dict
+
 import frappe
 from frappe import _
-from typing import Dict, Any
+
 from frappe_assistant_core.core.base_tool import BaseTool
 
 
 class SearchDoctype(BaseTool):
     """
     Tool for searching within a specific DocType.
-    
+
     Provides capabilities for:
     - Targeted search within specific DocTypes
     - Permission-aware results
     - Searchable field identification
     """
-    
+
     def __init__(self):
         super().__init__()
         self.name = "search_doctype"
         self.description = "Search within a specific DocType"
         self.requires_permission = None  # Permission checked dynamically per DocType
-        
+
         self.inputSchema = {
             "type": "object",
             "properties": {
-                "doctype": {
-                    "type": "string",
-                    "description": "DocType to search in"
-                },
-                "query": {
-                    "type": "string",
-                    "description": "Search query"
-                },
-                "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "description": "Maximum results"
-                }
+                "doctype": {"type": "string", "description": "DocType to search in"},
+                "query": {"type": "string", "description": "Search query"},
+                "limit": {"type": "integer", "default": 20, "description": "Maximum results"},
             },
-            "required": ["doctype", "query"]
+            "required": ["doctype", "query"],
         }
-    
+
     def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute DocType search"""
         try:
             # Import the search implementation
             from .search_tools import SearchTools
-            
+
             # Execute search using existing implementation
             return SearchTools.search_doctype(
                 doctype=arguments.get("doctype"),
                 query=arguments.get("query"),
-                limit=arguments.get("limit", 20)
+                limit=arguments.get("limit", 20),
             )
-            
+
         except Exception as e:
-            frappe.log_error(
-                title=_("Search DocType Error"),
-                message=f"Error searching DocType: {str(e)}"
-            )
-            
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            frappe.log_error(title=_("Search DocType Error"), message=f"Error searching DocType: {str(e)}")
+
+            return {"success": False, "error": str(e)}
 
 
 # Make sure class name matches file name for discovery

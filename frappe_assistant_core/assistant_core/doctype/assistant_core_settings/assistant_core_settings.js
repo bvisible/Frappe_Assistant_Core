@@ -10,14 +10,14 @@ frappe.ui.form.on("Assistant Core Settings", {
                 frm.refresh_field('plugin_status_html');
             }
         });
-        
+
         // Load SSE bridge status
         frm.call('get_sse_bridge_status').then(response => {
             if (response.message) {
                 frm.events.update_sse_bridge_status(frm, response.message);
             }
         });
-        
+
         // Add custom buttons
         frm.add_custom_button(__('Refresh Plugin System'), function() {
             frappe.call({
@@ -30,7 +30,7 @@ frappe.ui.form.on("Assistant Core Settings", {
                 }
             });
         }, __('Actions'));
-        
+
         // SSE Bridge control buttons
         if (frm.doc.sse_bridge_enabled) {
             frm.add_custom_button(__('Start SSE Bridge'), function() {
@@ -50,7 +50,7 @@ frappe.ui.form.on("Assistant Core Settings", {
                     }
                 });
             }, __('SSE Bridge'));
-            
+
             frm.add_custom_button(__('Stop SSE Bridge'), function() {
                 frappe.confirm(
                     __('Are you sure you want to stop the SSE Bridge?'),
@@ -73,7 +73,7 @@ frappe.ui.form.on("Assistant Core Settings", {
                     }
                 );
             }, __('SSE Bridge'));
-            
+
             frm.add_custom_button(__('Check SSE Bridge Status'), function() {
                 frm.call('get_sse_bridge_status').then(response => {
                     if (response.message) {
@@ -87,25 +87,25 @@ frappe.ui.form.on("Assistant Core Settings", {
             }, __('SSE Bridge'));
         }
     },
-    
+
     update_sse_bridge_status: function(frm, status) {
         const statusColors = {
             'running': 'success',
-            'starting': 'warning', 
+            'starting': 'warning',
             'stopped': 'secondary',
             'error': 'danger'
         };
-        
+
         const statusIcons = {
             'running': 'fa-check-circle',
             'starting': 'fa-spinner fa-spin',
             'stopped': 'fa-stop-circle',
             'error': 'fa-exclamation-circle'
         };
-        
+
         const color = statusColors[status.status] || 'secondary';
         const icon = statusIcons[status.status] || 'fa-question-circle';
-        
+
         let html = `
             <div class="card">
                 <div class="card-header">
@@ -140,7 +140,7 @@ frappe.ui.form.on("Assistant Core Settings", {
                 </div>
             </div>
         `;
-        
+
         frm.set_df_property('sse_bridge_status_html', 'options', html);
         frm.refresh_field('sse_bridge_status_html');
     }

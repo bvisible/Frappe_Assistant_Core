@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -27,28 +26,22 @@ from frappe import _
 def get_discovered_plugins():
     """
     Get list of all discovered plugins.
-    
+
     Returns:
         List of plugin information
     """
     frappe.only_for("System Manager")
-    
+
     try:
         from frappe_assistant_core.utils.plugin_manager import get_plugin_manager
-        
+
         plugin_manager = get_plugin_manager()
         plugins = plugin_manager.get_discovered_plugins()
-        
-        return {
-            "success": True,
-            "plugins": plugins
-        }
-        
+
+        return {"success": True, "plugins": plugins}
+
     except Exception as e:
-        frappe.log_error(
-            title=_("Plugin Discovery Error"),
-            message=str(e)
-        )
+        frappe.log_error(title=_("Plugin Discovery Error"), message=str(e))
         frappe.throw(_("Failed to get plugins: {0}").format(str(e)))
 
 
@@ -56,31 +49,28 @@ def get_discovered_plugins():
 def refresh_plugins():
     """
     Refresh plugin discovery.
-    
+
     Returns:
         Success status and plugin count
     """
     frappe.only_for("System Manager")
-    
+
     try:
         from frappe_assistant_core.utils.plugin_manager import refresh_plugin_manager
-        
+
         # Refresh plugin manager
         plugin_manager = refresh_plugin_manager()
         plugins = plugin_manager.get_discovered_plugins()
-        
+
         return {
             "success": True,
             "message": _("Plugin discovery completed"),
             "plugin_count": len(plugins),
-            "plugins": plugins
+            "plugins": plugins,
         }
-        
+
     except Exception as e:
-        frappe.log_error(
-            title=_("Plugin Refresh Error"),
-            message=str(e)
-        )
+        frappe.log_error(title=_("Plugin Refresh Error"), message=str(e))
         frappe.throw(_("Failed to refresh plugins: {0}").format(str(e)))
 
 
@@ -88,34 +78,28 @@ def refresh_plugins():
 def get_plugin_info(plugin_name):
     """
     Get detailed information about a specific plugin.
-    
+
     Args:
         plugin_name: Name of the plugin
-        
+
     Returns:
         Plugin information
     """
     frappe.only_for("System Manager")
-    
+
     try:
         from frappe_assistant_core.utils.plugin_manager import get_plugin_manager
-        
+
         plugin_manager = get_plugin_manager()
         plugin_info = plugin_manager.get_plugin_info(plugin_name)
-        
+
         if not plugin_info:
             frappe.throw(_("Plugin '{0}' not found").format(plugin_name))
-        
-        return {
-            "success": True,
-            "plugin": plugin_info
-        }
-        
+
+        return {"success": True, "plugin": plugin_info}
+
     except Exception as e:
-        frappe.log_error(
-            title=_("Plugin Info Error"),
-            message=str(e)
-        )
+        frappe.log_error(title=_("Plugin Info Error"), message=str(e))
         frappe.throw(_("Failed to get plugin info: {0}").format(str(e)))
 
 
@@ -123,28 +107,21 @@ def get_plugin_info(plugin_name):
 def get_available_tools():
     """
     Get list of all available tools from core and plugins.
-    
+
     Returns:
         List of tools with metadata
     """
     try:
         from frappe_assistant_core.core.tool_registry import get_tool_registry
-        
+
         registry = get_tool_registry()
         tools = registry.get_available_tools()
         stats = registry.get_stats()
-        
-        return {
-            "success": True,
-            "tools": tools,
-            "stats": stats
-        }
-        
+
+        return {"success": True, "tools": tools, "stats": stats}
+
     except Exception as e:
-        frappe.log_error(
-            title=_("Tool Registry Error"),
-            message=str(e)
-        )
+        frappe.log_error(title=_("Tool Registry Error"), message=str(e))
         frappe.throw(_("Failed to get tools: {0}").format(str(e)))
 
 
@@ -152,27 +129,20 @@ def get_available_tools():
 def refresh_tool_registry():
     """
     Refresh the tool registry.
-    
+
     Returns:
         Success status and tool count
     """
     frappe.only_for("System Manager")
-    
+
     try:
         from frappe_assistant_core.core.tool_registry import refresh_tool_registry
-        
+
         registry = refresh_tool_registry()
         stats = registry.get_stats()
-        
-        return {
-            "success": True,
-            "message": _("Tool registry refreshed"),
-            "stats": stats
-        }
-        
+
+        return {"success": True, "message": _("Tool registry refreshed"), "stats": stats}
+
     except Exception as e:
-        frappe.log_error(
-            title=_("Tool Registry Refresh Error"),
-            message=str(e)
-        )
+        frappe.log_error(title=_("Tool Registry Refresh Error"), message=str(e))
         frappe.throw(_("Failed to refresh tool registry: {0}").format(str(e)))

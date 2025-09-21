@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -15,9 +14,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Any, Dict
-import frappe
 import json
+from typing import Any, Dict
+
+import frappe
+
 
 class ConnectionManager:
     """Handles HTTP connections for the assistant server."""
@@ -28,13 +29,13 @@ class ConnectionManager:
     def add_connection(self, client_id: str, connection: Any) -> None:
         """Add a new connection to the manager."""
         self.connections[client_id] = connection
-        frappe.log("Connection added: {}".format(client_id))
+        frappe.log(f"Connection added: {client_id}")
 
     def remove_connection(self, client_id: str) -> None:
         """Remove a connection from the manager."""
         if client_id in self.connections:
             del self.connections[client_id]
-            frappe.log("Connection removed: {}".format(client_id))
+            frappe.log(f"Connection removed: {client_id}")
 
     def get_connection(self, client_id: str) -> Any:
         """Get a connection by client ID."""
@@ -46,10 +47,12 @@ class ConnectionManager:
             try:
                 connection.send(json.dumps(message))
             except Exception as e:
-                frappe.log_error("Error sending message to {}: {}".format(client_id, str(e)))
+                frappe.log_error(f"Error sending message to {client_id}: {str(e)}")
 
     def cleanup(self) -> None:
         """Clean up closed connections."""
-        closed_connections = [client_id for client_id, connection in self.connections.items() if not connection.is_open()]
+        closed_connections = [
+            client_id for client_id, connection in self.connections.items() if not connection.is_open()
+        ]
         for client_id in closed_connections:
             self.remove_connection(client_id)
