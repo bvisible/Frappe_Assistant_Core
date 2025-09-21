@@ -243,10 +243,21 @@ class BaseTool(ABC):
             # Log execution
             self.log_execution(arguments, response, execution_time)
             
-            # Log unexpected error
+            # Enhanced error logging with more diagnostic information
+            import traceback
+            error_details = {
+                "tool_name": self.name,
+                "error_message": str(e),
+                "error_type": type(e).__name__,
+                "execution_time": execution_time,
+                "arguments": arguments,
+                "traceback": traceback.format_exc()
+            }
+            
+            self.logger.error(f"Tool execution failed: {self.name} - {str(e)}", exc_info=True)
             frappe.log_error(
                 title=_("Tool Execution Error"),
-                message=f"{self.name}: {str(e)}"
+                message=f"Tool: {self.name}\nError: {str(e)}\nType: {type(e).__name__}\nArgs: {arguments}\n\nFull traceback:\n{traceback.format_exc()}"
             )
             
             return response

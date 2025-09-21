@@ -280,7 +280,7 @@ Advanced analytics, visualization, and file processing capabilities:
    - Structured data parsing from spreadsheets
    - Content preparation for LLM analysis
 
-**Dependencies:** pandas, numpy, matplotlib, seaborn, plotly, scipy, PyPDF2, Pillow, python-docx, pytesseract
+**Dependencies:** pandas, numpy, matplotlib, seaborn, plotly, scipy, pypdf, Pillow, python-docx, pytesseract
 **Environment Validation:** Automatic dependency checking on plugin load
 
 #### **Visualization Plugin** (`plugins/visualization/`) - Optional

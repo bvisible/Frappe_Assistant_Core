@@ -98,12 +98,18 @@ class ToolRegistry:
             else:
                 # Raise appropriate exception based on error type
                 error_type = result.get("error_type", "ExecutionError")
+                error_message = result.get("error", "Tool execution failed")
+                
                 if error_type == "PermissionError":
-                    raise PermissionError(result.get("error", "Permission denied"))
+                    raise PermissionError(error_message)
                 elif error_type == "ValidationError":
-                    raise frappe.ValidationError(result.get("error", "Validation failed"))
+                    raise frappe.ValidationError(error_message)
+                elif error_type == "DependencyError":
+                    raise Exception(f"Dependency error: {error_message}")
                 else:
-                    raise Exception(result.get("error", "Tool execution failed"))
+                    # Include error type and execution time in the message for better debugging
+                    execution_time = result.get("execution_time", "unknown")
+                    raise Exception(f"[{error_type}] {error_message} (execution_time: {execution_time}s)")
         
         return result
     

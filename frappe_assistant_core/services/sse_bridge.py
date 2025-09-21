@@ -9,28 +9,54 @@
 # (at your option) any later version.
 
 """
-SSE MCP Bridge Service for Frappe Assistant Core
+Enhanced SSE MCP Bridge Service for Frappe Assistant Core
+Improvements:
+- Proper connection ID management (no user collisions)
+- Support for multiple connections per user
+- Optional Redis storage for horizontal scaling
+- Better error handling and recovery
+- Connection health monitoring
+- Graceful cleanup mechanisms
 """
 
 import json
 import asyncio
 import os
-from typing import Dict, Any, Optional, AsyncGenerator, List
+from typing import Dict, Any, Optional, AsyncGenerator, List, Set
 from contextlib import asynccontextmanager
 import logging
 import uuid
 import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
 
 try:
     import httpx
-    from fastapi import FastAPI, HTTPException, Header, Request
+    from fastapi import FastAPI, HTTPException, Header, Request, Query
     from fastapi.responses import StreamingResponse, JSONResponse
     from pydantic import BaseModel
     from dotenv import load_dotenv
 except ImportError as e:
     print(f"Missing required dependencies for SSE bridge: {e}")
-    print("Please install with: pip install frappe_assistant_core[sse-bridge]")
+    print("Dependencies should already be installed with frappe_assistant_core")
+    print("If you see this error, please check your installation")
     exit(1)
+
+# Import configuration reader
+try:
+    from .config_reader import get_sse_bridge_config, get_redis_config, is_sse_bridge_enabled
+    CONFIG_READER_AVAILABLE = True
+except ImportError:
+    CONFIG_READER_AVAILABLE = False
+
+# Use Frappe's Redis configuration
+try:
+    import frappe
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
 
 # Load environment variables from various sources
 load_dotenv()  # Load from .env file if present
@@ -44,6 +70,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+class StorageBackend(Enum):
+    """Storage backend types"""
+    MEMORY = "memory"
+    REDIS = "redis"
+
 class MCPRequest(BaseModel):
     """MCP request model"""
     jsonrpc: str = "2.0"
@@ -51,28 +82,134 @@ class MCPRequest(BaseModel):
     params: Optional[Dict[str, Any]] = None
     id: Optional[Any] = None
 
+@dataclass
+class ConnectionInfo:
+    """Enhanced connection information"""
+    connection_id: str
+    user_context: str
+    server_url: str
+    auth_token: str
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    last_activity: datetime = field(default_factory=datetime.utcnow)
+    device_info: Optional[str] = None
+    ip_address: Optional[str] = None
+    active: bool = True
+    queue: Optional[asyncio.Queue] = None  # Only for memory backend
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for Redis storage"""
+        return {
+            "connection_id": self.connection_id,
+            "user_context": self.user_context,
+            "server_url": self.server_url,
+            "auth_token": self.auth_token,
+            "created_at": self.created_at.isoformat(),
+            "last_activity": self.last_activity.isoformat(),
+            "device_info": self.device_info,
+            "ip_address": self.ip_address,
+            "active": self.active
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ConnectionInfo':
+        """Create from dictionary (for Redis storage)"""
+        data["created_at"] = datetime.fromisoformat(data["created_at"])
+        data["last_activity"] = datetime.fromisoformat(data["last_activity"])
+        return cls(**data)
+
+@dataclass
 class PendingRequest:
     """Represents a pending request waiting for SSE connection"""
-    def __init__(self, request_data: Dict[str, Any], server_url: str, auth_token: str):
-        self.request_data = request_data
-        self.server_url = server_url
-        self.auth_token = auth_token
-        self.timestamp = time.time()
+    request_data: Dict[str, Any]
+    server_url: str
+    auth_token: str
+    timestamp: float = field(default_factory=time.time)
+    connection_id: Optional[str] = None  # Target specific connection
 
 class SSEMCPBridge:
     def __init__(self):
-        # Store active SSE connections mapped by user context
-        self.connections: Dict[str, asyncio.Queue] = {}
-        # Store connection metadata
-        self.connection_metadata: Dict[str, Dict[str, Any]] = {}
-        # Buffer for requests that arrive before SSE connection
+        # Storage backend - start with memory, detect Redis during initialization
+        self.storage_backend = StorageBackend.MEMORY  # Default to memory
+        
+        # Redis configuration
+        self.redis_client: Optional[Any] = None  # Will be redis.Redis if available
+        self.redis_key_prefix = "sse_bridge:"
+        
+        # Enhanced in-memory storage
+        self.connections: Dict[str, ConnectionInfo] = {}  # connection_id -> ConnectionInfo
+        self.user_connections: Dict[str, Set[str]] = {}  # user_context -> set of connection_ids
+        self.connection_queues: Dict[str, asyncio.Queue] = {}  # connection_id -> Queue
+        
+        # Pending requests buffer (by connection_id now)
         self.pending_requests: Dict[str, List[PendingRequest]] = {}
-        # Grace period in seconds to wait for SSE connection
-        self.connection_grace_period = 5.0
-        # Maximum connection idle time before cleanup (in seconds)
-        self.max_idle_time = 300.0  # 5 minutes
-        # Connection heartbeat interval
-        self.heartbeat_interval = 30.0  # 30 seconds
+        
+        # Configuration - using sensible defaults for Frappe integration
+        self.connection_grace_period = 5.0  # seconds to wait for SSE connection
+        self.max_idle_time = 300.0  # 5 minutes before cleanup
+        self.heartbeat_interval = 30.0  # 30 seconds ping interval
+        self.max_connections_per_user = 5  # max devices per user
+        
+        # Statistics
+        self.stats = {
+            "total_connections": 0,
+            "active_connections": 0,
+            "messages_sent": 0,
+            "errors_count": 0
+        }
+    
+    async def initialize(self):
+        """Initialize the bridge (connect to Redis if available)"""
+        if REDIS_AVAILABLE:
+            try:
+                # Get Redis configuration from config reader
+                if CONFIG_READER_AVAILABLE:
+                    redis_config = get_redis_config()
+                    logger.info(f"Using Redis config from Frappe: {redis_config}")
+                else:
+                    # Fallback to manual discovery
+                    redis_config = {
+                        "host": "localhost",
+                        "port": 6379,
+                        "db": 0,
+                        "decode_responses": True
+                    }
+                    
+                    # Try to read Redis config from bench config files
+                    import os
+                    bench_dir = os.getcwd()
+                    config_paths = [
+                        os.path.join(bench_dir, 'config', 'redis_cache.conf'),
+                        os.path.join(bench_dir, 'config', 'redis_queue.conf')
+                    ]
+                    
+                    for config_path in config_paths:
+                        try:
+                            with open(config_path, 'r') as f:
+                                for line in f:
+                                    if line.startswith('port '):
+                                        redis_config["port"] = int(line.split()[1])
+                                    elif line.startswith('bind '):
+                                        bind_addr = line.split()[1]
+                                        if bind_addr != '127.0.0.1':
+                                            redis_config["host"] = bind_addr
+                            break
+                        except FileNotFoundError:
+                            continue
+                
+                # Try to connect to Redis
+                self.redis_client = await redis.Redis(**redis_config)
+                await self.redis_client.ping()
+                self.storage_backend = StorageBackend.REDIS
+                logger.info(f"Connected to Redis at {redis_config['host']}:{redis_config['port']}/{redis_config['db']}")
+                    
+            except Exception as e:
+                logger.info(f"Redis not available ({e}), using memory storage for SSE bridge")
+                self.storage_backend = StorageBackend.MEMORY
+    
+    async def cleanup(self):
+        """Cleanup resources"""
+        if self.redis_client:
+            await self.redis_client.close()
     
     async def validate_authorization(self, authorization: Optional[str], server_url: str) -> Optional[str]:
         """Validate authorization (Bearer token or API key) with Frappe and return user context"""
@@ -187,6 +324,123 @@ class SSEMCPBridge:
         else:
             logger.warning(f"API key validation failed - status {response.status_code}: {response.text}")
             return None
+    
+    async def create_connection(self, user_context: str, server_url: str, 
+                               auth_token: str, device_info: Optional[str] = None,
+                               ip_address: Optional[str] = None) -> ConnectionInfo:
+        """Create a new connection with proper ID management"""
+        # Generate unique connection ID
+        connection_id = f"{user_context}_{uuid.uuid4().hex[:8]}"
+        
+        # Check max connections per user
+        if user_context in self.user_connections:
+            if len(self.user_connections[user_context]) >= self.max_connections_per_user:
+                # Remove oldest connection
+                oldest_id = min(self.user_connections[user_context])
+                await self.remove_connection(oldest_id)
+        
+        # Create connection info
+        connection = ConnectionInfo(
+            connection_id=connection_id,
+            user_context=user_context,
+            server_url=server_url,
+            auth_token=auth_token,
+            device_info=device_info,
+            ip_address=ip_address
+        )
+        
+        # Store connection
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            await self.redis_client.hset(
+                f"{self.redis_key_prefix}connections",
+                connection_id,
+                json.dumps(connection.to_dict())
+            )
+            await self.redis_client.sadd(
+                f"{self.redis_key_prefix}user:{user_context}",
+                connection_id
+            )
+        else:
+            # Memory storage
+            self.connections[connection_id] = connection
+            if user_context not in self.user_connections:
+                self.user_connections[user_context] = set()
+            self.user_connections[user_context].add(connection_id)
+            
+            # Create queue for this connection
+            self.connection_queues[connection_id] = asyncio.Queue()
+            connection.queue = self.connection_queues[connection_id]
+        
+        # Update stats
+        self.stats["total_connections"] += 1
+        self.stats["active_connections"] += 1
+        
+        logger.info(f"Created connection {connection_id} for user {user_context}")
+        return connection
+    
+    async def get_connection(self, connection_id: str) -> Optional[ConnectionInfo]:
+        """Get connection by ID"""
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            data = await self.redis_client.hget(
+                f"{self.redis_key_prefix}connections",
+                connection_id
+            )
+            if data:
+                return ConnectionInfo.from_dict(json.loads(data))
+        else:
+            return self.connections.get(connection_id)
+        return None
+    
+    async def update_connection_activity(self, connection_id: str):
+        """Update last activity timestamp"""
+        connection = await self.get_connection(connection_id)
+        if connection:
+            connection.last_activity = datetime.utcnow()
+            
+            if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+                await self.redis_client.hset(
+                    f"{self.redis_key_prefix}connections",
+                    connection_id,
+                    json.dumps(connection.to_dict())
+                )
+    
+    async def remove_connection(self, connection_id: str):
+        """Remove a connection properly"""
+        connection = await self.get_connection(connection_id)
+        if not connection:
+            return
+        
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            await self.redis_client.hdel(
+                f"{self.redis_key_prefix}connections",
+                connection_id
+            )
+            await self.redis_client.srem(
+                f"{self.redis_key_prefix}user:{connection.user_context}",
+                connection_id
+            )
+        else:
+            # Memory storage cleanup
+            if connection_id in self.connections:
+                user_context = self.connections[connection_id].user_context
+                del self.connections[connection_id]
+                
+                if user_context in self.user_connections:
+                    self.user_connections[user_context].discard(connection_id)
+                    if not self.user_connections[user_context]:
+                        del self.user_connections[user_context]
+                
+                if connection_id in self.connection_queues:
+                    del self.connection_queues[connection_id]
+        
+        # Clean up pending requests
+        if connection_id in self.pending_requests:
+            del self.pending_requests[connection_id]
+        
+        # Update stats
+        self.stats["active_connections"] -= 1
+        
+        logger.info(f"Removed connection {connection_id}")
     
     async def send_to_server(self, request_data: Dict[str, Any], server_url: str, authorization: str) -> Dict[str, Any]:
         """Send request to HTTP MCP server using authorization header"""
@@ -384,60 +638,129 @@ class SSEMCPBridge:
         # For standard notifications (no id), return empty response that won't be sent
         return None
     
-    async def queue_response_for_connection(self, user_context: str, response: Dict[str, Any]):
-        """Queue a response to be sent via SSE to the appropriate connection"""
-        if user_context in self.connections:
-            await self.connections[user_context].put(response)
-            # Better logging for debugging
-            response_id = response.get('id')
-            if "result" in response and isinstance(response["result"], dict) and "tools" in response["result"]:
-                tools_count = len(response["result"]["tools"])
-                logger.info(f"Queued tools/list response for user {user_context}: id={response_id}, tools={tools_count}")
-            else:
-                logger.info(f"Queued response for user {user_context}: id={response_id}")
+    async def queue_response_for_connection(self, connection_id: str, response: Dict[str, Any]):
+        """Queue a response to be sent via SSE to specific connection"""
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            # For Redis, use pub/sub or a list
+            await self.redis_client.rpush(
+                f"{self.redis_key_prefix}queue:{connection_id}",
+                json.dumps(response)
+            )
         else:
-            logger.warning(f"No active SSE connection for user {user_context}")
+            # Memory queue
+            if connection_id in self.connection_queues:
+                await self.connection_queues[connection_id].put(response)
+                self.stats["messages_sent"] += 1
+                logger.info(f"Queued response for connection {connection_id}: id={response.get('id')}")
+            else:
+                logger.warning(f"No active queue for connection {connection_id}")
     
-    async def process_pending_requests(self, user_context: str):
-        """Process any pending requests for a user once their SSE connection is established"""
-        if user_context in self.pending_requests:
-            pending = self.pending_requests.pop(user_context)
-            logger.info(f"Processing {len(pending)} pending requests for user {user_context}")
+    async def get_queued_response(self, connection_id: str, timeout: float = 5.0) -> Optional[Dict[str, Any]]:
+        """Get queued response for a connection"""
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            # Use blocking pop with timeout
+            result = await self.redis_client.blpop(
+                f"{self.redis_key_prefix}queue:{connection_id}",
+                timeout=int(timeout)
+            )
+            if result:
+                return json.loads(result[1])
+        else:
+            # Memory queue
+            if connection_id in self.connection_queues:
+                try:
+                    return await asyncio.wait_for(
+                        self.connection_queues[connection_id].get(),
+                        timeout=timeout
+                    )
+                except asyncio.TimeoutError:
+                    return None
+        return None
+    
+    async def broadcast_to_user(self, user_context: str, message: Dict[str, Any]):
+        """Broadcast message to all connections of a user"""
+        connection_ids = []
+        
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            connection_ids = await self.redis_client.smembers(
+                f"{self.redis_key_prefix}user:{user_context}"
+            )
+            connection_ids = [cid.decode() for cid in connection_ids]
+        else:
+            connection_ids = list(self.user_connections.get(user_context, []))
+        
+        for connection_id in connection_ids:
+            await self.queue_response_for_connection(connection_id, message)
+    
+    async def process_pending_requests(self, connection_id: str):
+        """Process any pending requests for a connection once established"""
+        if connection_id in self.pending_requests:
+            pending = self.pending_requests.pop(connection_id)
+            logger.info(f"Processing {len(pending)} pending requests for connection {connection_id}")
             
             for req in pending:
                 try:
-                    await self.process_mcp_request(
+                    response = await self.send_to_server(
                         req.request_data,
                         req.server_url,
-                        req.auth_token,
-                        user_context,
-                        use_sse=True
+                        req.auth_token
                     )
+                    await self.queue_response_for_connection(connection_id, response)
                 except Exception as e:
                     logger.error(f"Error processing pending request: {e}")
     
-    async def cleanup_old_pending_requests(self):
-        """Remove old pending requests that have exceeded the grace period"""
-        current_time = time.time()
-        for user_context in list(self.pending_requests.keys()):
-            pending = self.pending_requests.get(user_context, [])
-            # Remove requests older than grace period
-            self.pending_requests[user_context] = [
-                req for req in pending 
-                if current_time - req.timestamp < self.connection_grace_period
-            ]
-            # Remove user entry if no pending requests
-            if not self.pending_requests[user_context]:
-                del self.pending_requests[user_context]
+    async def cleanup_idle_connections(self):
+        """Remove idle connections that exceed max idle time"""
+        current_time = datetime.utcnow()
+        idle_threshold = current_time - timedelta(seconds=self.max_idle_time)
+        
+        connections_to_remove = []
+        
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            # Get all connections from Redis
+            all_connections = await self.redis_client.hgetall(
+                f"{self.redis_key_prefix}connections"
+            )
+            for conn_id, conn_data in all_connections.items():
+                connection = ConnectionInfo.from_dict(json.loads(conn_data))
+                if connection.last_activity < idle_threshold:
+                    connections_to_remove.append(conn_id.decode())
+        else:
+            # Check memory connections
+            for conn_id, connection in self.connections.items():
+                if connection.last_activity < idle_threshold:
+                    connections_to_remove.append(conn_id)
+        
+        # Remove idle connections
+        for conn_id in connections_to_remove:
+            logger.info(f"Removing idle connection: {conn_id}")
+            await self.remove_connection(conn_id)
+    
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get bridge statistics"""
+        stats = self.stats.copy()
+        
+        if self.storage_backend == StorageBackend.REDIS and self.redis_client:
+            # Get active connections from Redis
+            all_connections = await self.redis_client.hlen(
+                f"{self.redis_key_prefix}connections"
+            )
+            stats["active_connections"] = all_connections
+        else:
+            stats["active_connections"] = len(self.connections)
+            stats["users_connected"] = len(self.user_connections)
+        
+        stats["storage_backend"] = self.storage_backend.value
+        return stats
     
     async def process_mcp_request(self, request_data: Dict[str, Any], server_url: str, 
-                                  auth_token: str, user_context: str, use_sse: bool = True) -> Dict[str, Any]:
+                                  auth_token: str, connection_id: Optional[str] = None) -> Dict[str, Any]:
         """Process MCP request and optionally queue response for SSE"""
         try:
             method = request_data.get("method")
             request_id = request_data.get("id")
             
-            logger.info(f"Processing MCP request: {method} (id: {request_id}) for server: {server_url}")
+            logger.info(f"Processing MCP request: {method} (id: {request_id}) for connection: {connection_id}")
             
             # Handle methods locally or forward to HTTP server
             if method == "initialize":
@@ -454,19 +777,21 @@ class SSEMCPBridge:
                 # Forward all other requests to HTTP server
                 response = await self.send_to_server(request_data, server_url, auth_token)
             
-            # If using SSE, queue the response for the SSE stream
-            if use_sse and user_context in self.connections:
+            # If connection_id provided, queue the response for SSE
+            if connection_id:
                 # Only queue response if it's not None (notifications may not need responses)
                 if response is not None:
-                    await self.queue_response_for_connection(user_context, response)
+                    await self.queue_response_for_connection(connection_id, response)
+                    await self.update_connection_activity(connection_id)
                 # Return a simple acknowledgment for POST request
-                return {"status": "accepted", "id": request_id}
+                return {"status": "accepted", "id": request_id, "connection_id": connection_id}
             else:
                 # Return response directly (for non-SSE requests)
                 return response
             
         except Exception as e:
             logger.error(f"Error processing MCP request: {e}")
+            self.stats["errors_count"] += 1
             error_response = self.format_error_response(
                 -32603,
                 "Internal error",
@@ -474,32 +799,57 @@ class SSEMCPBridge:
                 request_data.get("id")
             )
             
-            if use_sse and user_context in self.connections:
-                await self.queue_response_for_connection(user_context, error_response)
-                return {"status": "error", "id": request_id}
+            if connection_id:
+                await self.queue_response_for_connection(connection_id, error_response)
+                return {"status": "error", "id": request_id, "connection_id": connection_id}
             else:
                 return error_response
 
 # Initialize bridge
 bridge = SSEMCPBridge()
 
-# Background task to cleanup old pending requests
+# Background tasks
 async def cleanup_task():
-    """Periodically cleanup old pending requests"""
+    """Periodically cleanup idle connections"""
     while True:
-        await asyncio.sleep(10)  # Run every 10 seconds
-        await bridge.cleanup_old_pending_requests()
+        await asyncio.sleep(60)  # Run every minute
+        try:
+            await bridge.cleanup_idle_connections()
+        except Exception as e:
+            logger.error(f"Cleanup task error: {e}")
+
+async def stats_logger():
+    """Periodically log statistics"""
+    while True:
+        await asyncio.sleep(300)  # Every 5 minutes
+        try:
+            stats = await bridge.get_stats()
+            logger.info(f"Bridge stats: {stats}")
+        except Exception as e:
+            logger.error(f"Stats logger error: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    logger.info("Starting Frappe Assistant Core SSE MCP Bridge")
-    # Start cleanup task
+    logger.info("Starting Enhanced Frappe Assistant Core SSE MCP Bridge")
+    
+    # Initialize bridge
+    await bridge.initialize()
+    
+    # Start background tasks
     cleanup = asyncio.create_task(cleanup_task())
+    stats_log = asyncio.create_task(stats_logger())
+    
     yield
-    # Cancel cleanup task
+    
+    # Cancel background tasks
     cleanup.cancel()
-    logger.info("Shutting down Frappe Assistant Core SSE MCP Bridge")
+    stats_log.cancel()
+    
+    # Cleanup bridge
+    await bridge.cleanup()
+    
+    logger.info("Shutting down Enhanced Frappe Assistant Core SSE MCP Bridge")
 
 # Create FastAPI app
 def create_app():
@@ -514,93 +864,89 @@ def create_app():
     @app.get("/health")
     async def health_check():
         """Health check endpoint"""
+        stats = await bridge.get_stats()
         return {
             "status": "healthy", 
-            "service": "frappe-assistant-core-sse-bridge",
-            "active_connections": len(bridge.connections),
-            "pending_requests": sum(len(reqs) for reqs in bridge.pending_requests.values())
+            "service": "frappe-assistant-core-sse-bridge-enhanced",
+            **stats
         }
+    
+    @app.get("/stats")
+    async def get_statistics():
+        """Get detailed bridge statistics"""
+        return await bridge.get_stats()
 
     @app.get("/mcp/sse")
     async def mcp_sse_endpoint_get(
         request: Request,
-        server_url: str,
+        server_url: str = Query(..., description="Frappe server URL"),
+        device: Optional[str] = Query(None, description="Device identifier"),
         authorization: Optional[str] = Header(None)
     ):
-        """SSE endpoint for MCP - establishes SSE stream and provides endpoint URL"""
+        """SSE endpoint for MCP - establishes SSE stream with enhanced connection management"""
         
-        # Validate authorization (OAuth or API key)
+        # Get client IP
+        client_ip = request.client.host if request.client else None
+        
+        # Validate authorization
         user_context = await bridge.validate_authorization(authorization, server_url)
         if not user_context:
-            raise HTTPException(status_code=401, detail="Invalid or missing authorization token")
-        
-        # Store the full authorization header for later use
-        if not authorization:
-            raise HTTPException(status_code=401, detail="Missing authorization header")
+            raise HTTPException(status_code=401, detail="Invalid or missing authorization")
         
         async def generate_sse_stream() -> AsyncGenerator[str, None]:
             """Generate SSE stream for MCP responses"""
             
-            connection_id = f"{user_context}_{uuid.uuid4().hex[:8]}"
-            response_queue = asyncio.Queue()
+            # Create connection with enhanced management
+            connection = await bridge.create_connection(
+                user_context=user_context,
+                server_url=server_url,
+                auth_token=authorization,
+                device_info=device,
+                ip_address=client_ip
+            )
             
-            # Store connection info
-            bridge.connections[user_context] = response_queue
-            bridge.connection_metadata[user_context] = {
-                "connection_id": connection_id,
-                "server_url": server_url,
-                "auth_token": authorization
-            }
+            connection_id = connection.connection_id
             
             try:
-                logger.info(f"SSE connection established: {connection_id} for user: {user_context}")
+                logger.info(f"SSE connection established: {connection_id}")
                 
-                # Send endpoint event - tells client where to send POST messages
-                endpoint_url = f"/mcp/messages?session_id={connection_id}"
+                # Send connection info to client (use 'endpoint' event for MCP SDK compatibility)
                 yield f"event: endpoint\n"
-                yield f"data: {endpoint_url}\n\n"
+                yield f"data: /mcp/messages?cid={connection_id}\n\n"
                 
-                # Give the connection a moment to stabilize
-                await asyncio.sleep(0.1)
-                
-                # Process any pending requests
-                await bridge.process_pending_requests(user_context)
+                # Process any pending requests for this connection
+                await bridge.process_pending_requests(connection_id)
                 
                 # Keep connection alive and send queued responses
                 ping_counter = 0
                 while True:
                     try:
-                        # Wait for responses to send (with timeout for ping)
-                        response = await asyncio.wait_for(response_queue.get(), timeout=5.0)
-                        yield f"event: message\n"
-                        yield f"data: {json.dumps(response)}\n\n"
-                        logger.info(f"Sent SSE response: {response.get('id')} to {connection_id}")
+                        # Get queued response with timeout
+                        response = await bridge.get_queued_response(connection_id, timeout=5.0)
                         
-                    except asyncio.TimeoutError:
-                        # Send periodic ping as a comment to keep connection alive
-                        # SSE comments start with ':' and don't trigger events in clients
-                        ping_counter += 1
-                        ping_timestamp = time.time()
-                        # Send as SSE comment - this keeps the connection alive without triggering unknown event warnings
-                        yield f": ping {ping_counter} at {ping_timestamp}\n\n"
-                        
+                        if response:
+                            yield f"event: message\n"
+                            yield f"data: {json.dumps(response)}\n\n"
+                            await bridge.update_connection_activity(connection_id)
+                        else:
+                            # Send ping to keep alive
+                            ping_counter += 1
+                            yield f": ping {ping_counter}\n\n"
+                            
                     except Exception as e:
-                        logger.error(f"Error in SSE stream: {e}")
-                        # Include a null id for stream errors to comply with JSON-RPC spec
-                        error_response = bridge.format_error_response(-32603, "Stream error", str(e), request_id=None)
+                        logger.error(f"Error in SSE stream {connection_id}: {e}")
+                        error_response = bridge.format_error_response(
+                            -32603, "Stream error", str(e), None
+                        )
                         yield f"event: error\n"
                         yield f"data: {json.dumps(error_response)}\n\n"
                         break
                         
             except Exception as e:
-                logger.error(f"SSE connection error: {e}")
+                logger.error(f"SSE connection error {connection_id}: {e}")
                 
             finally:
-                # Cleanup connection
-                if user_context in bridge.connections:
-                    del bridge.connections[user_context]
-                if user_context in bridge.connection_metadata:
-                    del bridge.connection_metadata[user_context]
+                await bridge.remove_connection(connection_id)
                 logger.info(f"SSE connection closed: {connection_id}")
         
         return StreamingResponse(
@@ -618,97 +964,147 @@ def create_app():
     @app.post("/mcp/messages")
     async def mcp_messages_endpoint(
         request: Request,
-        session_id: str,
+        cid: str = Query(..., description="Connection ID"),
         authorization: Optional[str] = Header(None)
     ):
         """MCP message endpoint - handles POST messages from client"""
         
-        # Find the user context and server URL from session_id
-        user_context = None
-        server_url = None
+        # Get connection
+        connection = await bridge.get_connection(cid)
+        if not connection:
+            raise HTTPException(status_code=404, detail="Connection not found")
         
-        for ctx, meta in bridge.connection_metadata.items():
-            if session_id in meta.get("connection_id", ""):
-                user_context = ctx
-                server_url = meta.get("server_url")
-                break
-        
-        if not user_context or not server_url:
-            raise HTTPException(status_code=400, detail="Invalid session ID or no active connection")
-        
-        # Validate authorization (OAuth or API key) - this ensures the token is still valid
-        validated_user = await bridge.validate_authorization(authorization, server_url)
-        if not validated_user or validated_user != user_context:
-            raise HTTPException(status_code=401, detail="Invalid or missing authorization token")
-        
-        # Double-check connection exists
-        if user_context not in bridge.connections:
-            raise HTTPException(status_code=400, detail="No active SSE connection")
+        # Validate authorization matches
+        validated_user = await bridge.validate_authorization(authorization, connection.server_url)
+        if not validated_user or validated_user != connection.user_context:
+            raise HTTPException(status_code=401, detail="Authorization mismatch")
         
         try:
-            # Read the MCP request from POST body
+            # Read MCP request
             body = await request.body()
             mcp_request = json.loads(body.decode('utf-8'))
             
-            logger.info(f"Received MCP message: {mcp_request.get('method')} (id: {mcp_request.get('id')}) from {user_context}")
+            logger.info(f"Received MCP message: {mcp_request.get('method')} from {cid}")
             
-            # Get auth token from connection metadata (we already have server_url from above)
-            metadata = bridge.connection_metadata.get(user_context, {})
-            auth_token = metadata.get("auth_token")
-            
-            if not auth_token:
-                raise HTTPException(status_code=500, detail="Connection metadata missing auth token")
-            
-            # Process the MCP request and queue response for SSE
+            # Process request and queue response
             await bridge.process_mcp_request(
-                mcp_request, 
-                server_url, 
-                auth_token, 
-                user_context,
-                use_sse=True
+                mcp_request,
+                connection.server_url,
+                connection.auth_token,
+                connection_id=cid
             )
             
-            # Return simple acknowledgment
             return JSONResponse(
-                content={"status": "accepted"},
-                status_code=202  # Accepted
+                content={"status": "accepted", "connection_id": cid},
+                status_code=202
             )
             
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in POST request: {e}")
-            raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+            raise HTTPException(status_code=400, detail="Invalid JSON")
         
         except Exception as e:
             logger.error(f"Error processing MCP message: {e}")
-            raise HTTPException(status_code=500, detail="Internal server error")
+            raise HTTPException(status_code=500, detail=str(e))
 
     # Add other endpoints...
     return app
 
+def create_pid_file():
+    """Create PID file for process management"""
+    pid_file = "/tmp/frappe_sse_bridge.pid"
+    with open(pid_file, 'w') as f:
+        f.write(str(os.getpid()))
+    return pid_file
+
+def cleanup_pid_file(pid_file):
+    """Clean up PID file"""
+    try:
+        if os.path.exists(pid_file):
+            os.remove(pid_file)
+            logger.info(f"Cleaned up PID file: {pid_file}")
+    except Exception as e:
+        logger.warning(f"Could not remove PID file {pid_file}: {e}")
+
+def setup_signal_handlers(pid_file):
+    """Setup signal handlers for graceful shutdown"""
+    import signal
+    
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down gracefully...")
+        cleanup_pid_file(pid_file)
+        # Let the asyncio event loop handle the shutdown
+        raise KeyboardInterrupt()
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
 def main():
-    """Main entry point for the SSE bridge service"""
+    """Main entry point for the enhanced SSE bridge service"""
     import uvicorn
     
-    # Get configuration from environment
-    host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", "8080"))
-    debug = os.environ.get("DEBUG", "false").lower() == "true"
+    # Create PID file for process management
+    pid_file = create_pid_file()
+    logger.info(f"SSE bridge PID file created: {pid_file} (PID: {os.getpid()})")
+    
+    # Setup signal handlers
+    setup_signal_handlers(pid_file)
+    
+    # Get configuration from config reader or environment variables
+    if CONFIG_READER_AVAILABLE:
+        config = get_sse_bridge_config()
+        host = config["host"]
+        port = config["port"]
+        debug = config["debug"]
+        enabled = config["enabled"]
+        
+        if not enabled:
+            logger.info("SSE bridge is disabled in Assistant Core Settings - exiting")
+            logger.info("To enable: Go to Assistant Core Settings and check 'Enable SSE Bridge'")
+            cleanup_pid_file(pid_file)
+            return
+            
+        logger.info(f"Using configuration from Assistant Core Settings")
+        logger.info(f"SSE Bridge enabled: {enabled}")
+    else:
+        # Fallback to environment variables
+        host = os.environ.get("SSE_BRIDGE_HOST", os.environ.get("HOST", "0.0.0.0"))
+        port = int(os.environ.get("SSE_BRIDGE_PORT", os.environ.get("PORT", "8080")))
+        debug = os.environ.get("SSE_BRIDGE_DEBUG", os.environ.get("DEBUG", "false")).lower() == "true"
+        enabled = os.environ.get("SSE_BRIDGE_ENABLED", "true").lower() == "true"
+        
+        if not enabled:
+            logger.info("SSE bridge is disabled via environment variable SSE_BRIDGE_ENABLED=false")
+            cleanup_pid_file(pid_file)
+            return
+            
+        logger.info(f"Using configuration from environment variables")
     
     logger.info(f"Starting Frappe Assistant Core SSE MCP Bridge on {host}:{port}")
-    logger.info("Bridge configured to handle race conditions")
-    logger.info("POST requests are buffered if SSE connection not established")
-    logger.info(f"Grace period for pending requests: {bridge.connection_grace_period}s")
+    logger.info(f"Process ID: {os.getpid()}")
+    logger.info(f"Storage backend: Will be determined during initialization")
+    logger.info(f"Max connections per user: {bridge.max_connections_per_user}")
+    logger.info(f"Max idle time: {bridge.max_idle_time}s")
+    logger.info(f"Debug mode: {'enabled' if debug else 'disabled'}")
+    logger.info(f"Integration: Independent process with Frappe settings coordination")
     
     # Create app
     app = create_app()
     
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        reload=debug,
-        log_level="info" if not debug else "debug"
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            reload=debug,
+            log_level="info" if not debug else "debug"
+        )
+    except KeyboardInterrupt:
+        logger.info("SSE bridge shutting down gracefully...")
+    except Exception as e:
+        logger.error(f"SSE bridge encountered an error: {e}")
+    finally:
+        cleanup_pid_file(pid_file)
 
 if __name__ == "__main__":
     main()

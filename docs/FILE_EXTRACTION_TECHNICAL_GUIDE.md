@@ -48,7 +48,7 @@ The tool follows a **separation of concerns** principle:
 │                              ↓                                   │
 │  3. Processing Router                                           │
 │  ┌────────────────────────────────────────────────────────┐    │
-│  │         PDF ──→ PyPDF2/pdfplumber                       │    │
+│  │         PDF ──→ pypdf/pdfplumber                        │    │
 │  │       Image ──→ Pillow + Tesseract                      │    │
 │  │    CSV/Excel ──→ pandas + openpyxl                      │    │
 │  │        DOCX ──→ python-docx                             │    │
@@ -158,13 +158,13 @@ if operation == "extract":
 
 ## Library Deep Dive
 
-### 1. PyPDF2 - PDF Text Extraction
+### 1. pypdf - PDF Text Extraction
 
 **Purpose**: Extract text from PDF files
 
 **How it works:**
 ```python
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 import io
 
 # Create a PDF reader from bytes
@@ -175,13 +175,13 @@ reader = PdfReader(pdf_file)
 for page_num in range(len(reader.pages)):
     page = reader.pages[page_num]
     text = page.extract_text()
-    # PyPDF2 uses content stream parsing to extract text
+    # pypdf uses content stream parsing to extract text
     # It interprets PDF drawing commands to reconstruct text
 ```
 
 **Behind the scenes:**
 - PDFs store text as drawing instructions (not actual text)
-- PyPDF2 parses these instructions and reconstructs readable text
+- pypdf parses these instructions and reconstructs readable text
 - Works well for digitally created PDFs
 - May fail on scanned PDFs (images of text)
 
@@ -360,7 +360,7 @@ def _extract_pdf_content(self, file_content, arguments):
     """
     Extract text from PDF with fallback strategies
     """
-    # Step 1: Try PyPDF2 for regular PDFs
+    # Step 1: Try pypdf for regular PDFs
     try:
         reader = PdfReader(io.BytesIO(file_content))
         text_content = []
@@ -1051,7 +1051,7 @@ def extract_fields_intelligently(content, document_type):
 
 ## Conclusion
 
-The `extract_file_content` tool is a powerful bridge between binary file formats and text-based AI processing. By understanding how each component works - from file retrieval through Frappe's File DocType to specialized extraction using libraries like PyPDF2, Tesseract, and pandas - developers can effectively process any document type for LLM analysis.
+The `extract_file_content` tool is a powerful bridge between binary file formats and text-based AI processing. By understanding how each component works - from file retrieval through Frappe's File DocType to specialized extraction using libraries like pypdf, Tesseract, and pandas - developers can effectively process any document type for LLM analysis.
 
 The tool's strength lies in its:
 1. **Flexibility**: Handles multiple file formats with appropriate extractors

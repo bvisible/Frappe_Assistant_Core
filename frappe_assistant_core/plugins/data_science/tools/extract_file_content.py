@@ -208,9 +208,9 @@ class ExtractFileContent(BaseTool):
         
         # Check required libraries
         try:
-            import PyPDF2
+            import pypdf
         except ImportError:
-            missing_deps.append("PyPDF2")
+            missing_deps.append("pypdf")
         
         try:
             import PIL
@@ -380,8 +380,7 @@ class ExtractFileContent(BaseTool):
     def _extract_pdf_content(self, file_content: bytes, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Extract content from PDF"""
         try:
-            import PyPDF2
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
             
             # Create PDF reader
             pdf_file = io.BytesIO(file_content)

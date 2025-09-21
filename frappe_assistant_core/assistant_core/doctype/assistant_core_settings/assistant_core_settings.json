@@ -15,7 +15,13 @@
   "response_limit_prevention",
   "streaming_behavior_instructions",
   "streaming_line_threshold",
-  "streaming_char_threshold"
+  "streaming_char_threshold",
+  "sse_bridge_section",
+  "sse_bridge_enabled",
+  "sse_bridge_port",
+  "sse_bridge_host",
+  "sse_bridge_debug",
+  "sse_bridge_status_html"
  ],
  "fields": [
   {
@@ -83,6 +89,46 @@
    "fieldname": "streaming_char_threshold",
    "fieldtype": "Int",
    "label": "Character Threshold for Streaming"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sse_bridge_section",
+   "fieldtype": "Section Break",
+   "label": "SSE Bridge Configuration"
+  },
+  {
+   "default": "1",
+   "description": "Enable or disable the SSE MCP Bridge for real-time communication",
+   "fieldname": "sse_bridge_enabled",
+   "fieldtype": "Check",
+   "label": "Enable SSE Bridge"
+  },
+  {
+   "default": "8080",
+   "description": "Port number for the SSE bridge server",
+   "fieldname": "sse_bridge_port",
+   "fieldtype": "Int",
+   "label": "SSE Bridge Port"
+  },
+  {
+   "default": "0.0.0.0",
+   "description": "Host address to bind the SSE bridge server",
+   "fieldname": "sse_bridge_host",
+   "fieldtype": "Data",
+   "label": "SSE Bridge Host"
+  },
+  {
+   "default": "0",
+   "description": "Enable debug mode for SSE bridge logging",
+   "fieldname": "sse_bridge_debug",
+   "fieldtype": "Check",
+   "label": "Enable SSE Bridge Debug Mode"
+  },
+  {
+   "fieldname": "sse_bridge_status_html",
+   "fieldtype": "HTML",
+   "label": "SSE Bridge Status",
+   "options": "<div id=\"sse-bridge-status-container\">Loading SSE bridge status...</div>"
   }
  ],
  "issingle": 1,

@@ -101,7 +101,7 @@ def handle_tool_call(params: Dict[str, Any], request_id: Optional[Any]) -> Dict[
             result = registry.execute_tool(tool_name, arguments)
         except ValueError as e:
             # Tool not found
-            api_logger.warning(f"Tool {tool_name} not available for user {frappe.session.user}")
+            api_logger.warning(f"Tool {tool_name} not available for user {frappe.session.user}: {str(e)}")
             response = {
                 "jsonrpc": "2.0",
                 "error": {
@@ -112,14 +112,50 @@ def handle_tool_call(params: Dict[str, Any], request_id: Optional[Any]) -> Dict[
             if request_id is not None:
                 response["id"] = request_id
             return response
-        except PermissionError:
+        except PermissionError as e:
             # Permission denied
-            api_logger.warning(f"Permission denied for tool {tool_name} and user {frappe.session.user}")
+            api_logger.warning(f"Permission denied for tool {tool_name} and user {frappe.session.user}: {str(e)}")
             response = {
                 "jsonrpc": "2.0",
                 "error": {
                     "code": ErrorCodes.AUTHENTICATION_REQUIRED,
                     "message": ErrorMessages.ACCESS_DENIED
+                }
+            }
+            if request_id is not None:
+                response["id"] = request_id
+            return response
+        except frappe.ValidationError as e:
+            # Validation error - provide more specific details
+            api_logger.error(f"Validation error in tool {tool_name} for user {frappe.session.user}: {str(e)}")
+            response = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": ErrorCodes.INVALID_PARAMS,
+                    "message": f"Tool validation failed: {str(e)}",
+                    "data": {
+                        "tool_name": tool_name,
+                        "error_type": "ValidationError",
+                        "details": str(e)
+                    }
+                }
+            }
+            if request_id is not None:
+                response["id"] = request_id
+            return response
+        except Exception as e:
+            # All other execution errors - provide detailed logging
+            api_logger.error(f"Tool execution failed for {tool_name} (user: {frappe.session.user}): {str(e)}", exc_info=True)
+            response = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": ErrorCodes.INTERNAL_ERROR,
+                    "message": f"Tool execution failed: {str(e)}",
+                    "data": {
+                        "tool_name": tool_name,
+                        "error_type": type(e).__name__,
+                        "details": str(e)
+                    }
                 }
             }
             if request_id is not None:
