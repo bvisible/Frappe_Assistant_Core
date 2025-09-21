@@ -118,7 +118,7 @@ Build unlimited analysis depth via progressive artifact updates.
             import sys
 
             if not self.sse_bridge_enabled:
-                frappe.throw("SSE bridge is disabled in settings. Enable it first.")
+                frappe.throw(_("SSE bridge is disabled in settings. Enable it first."))
 
             pid_file = "/tmp/frappe_sse_bridge.pid"
 
@@ -131,7 +131,7 @@ Build unlimited analysis depth via progressive artifact updates.
                 try:
                     result = subprocess.run(["ps", "-p", pid], capture_output=True, text=True)
                     if result.returncode == 0:
-                        frappe.msgprint("SSE bridge is already running")
+                        frappe.msgprint(_("SSE bridge is already running"))
                         return {
                             "success": True,
                             "message": "Already running",
@@ -203,7 +203,7 @@ Build unlimited analysis depth via progressive artifact updates.
 
             # Check if PID file exists
             if not os.path.exists(pid_file):
-                frappe.msgprint("SSE bridge is not currently running")
+                frappe.msgprint(_("SSE bridge is not currently running"))
                 return {"success": True, "message": "Not running", "status": "stopped"}
 
             # Read PID from file
@@ -212,12 +212,12 @@ Build unlimited analysis depth via progressive artifact updates.
                     pid = f.read().strip()
 
                 if not pid:
-                    frappe.msgprint("Invalid PID file - SSE bridge may not be running")
+                    frappe.msgprint(_("Invalid PID file - SSE bridge may not be running"))
                     os.remove(pid_file)
                     return {"success": True, "message": "Not running", "status": "stopped"}
 
             except Exception as e:
-                frappe.msgprint("Error reading PID file - removing stale file")
+                frappe.msgprint(_("Error reading PID file - removing stale file"))
                 try:
                     os.remove(pid_file)
                 except OSError:
@@ -228,11 +228,11 @@ Build unlimited analysis depth via progressive artifact updates.
             try:
                 result = subprocess.run(["ps", "-p", pid], capture_output=True, text=True)
                 if result.returncode != 0:
-                    frappe.msgprint("SSE bridge process not found - cleaning up PID file")
+                    frappe.msgprint(_("SSE bridge process not found - cleaning up PID file"))
                     os.remove(pid_file)
                     return {"success": True, "message": "Not running", "status": "stopped"}
             except Exception:
-                frappe.msgprint("Error checking process - cleaning up PID file")
+                frappe.msgprint(_("Error checking process - cleaning up PID file"))
                 try:
                     os.remove(pid_file)
                 except OSError:

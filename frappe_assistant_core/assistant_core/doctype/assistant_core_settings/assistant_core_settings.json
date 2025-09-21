@@ -17,6 +17,7 @@
   "streaming_line_threshold",
   "streaming_char_threshold",
   "sse_bridge_section",
+  "sse_bridge_warning",
   "sse_bridge_enabled",
   "sse_bridge_port",
   "sse_bridge_host",
@@ -95,6 +96,11 @@
    "fieldname": "sse_bridge_section",
    "fieldtype": "Section Break",
    "label": "SSE Bridge Configuration"
+  },
+  {
+   "fieldname": "sse_bridge_warning",
+   "fieldtype": "HTML",
+   "options": "<div class=\"alert alert-warning\" style=\"margin-bottom: 15px;\"><h6><i class=\"fa fa-exclamation-triangle\"></i> Experimental Feature</h6><p><strong>Important:</strong> The SSE Bridge is an experimental feature that:</p><ul><li><strong>Does not work on Frappe Cloud</strong> - Only available for self-hosted installations</li><li>May have stability issues and is subject to breaking changes</li><li>Requires manual port management and process monitoring</li><li>Is intended for development and testing environments</li></ul><p><small>For production use, consider using the standard MCP bridge instead.</small></p></div>"
   },
   {
    "default": "1",
