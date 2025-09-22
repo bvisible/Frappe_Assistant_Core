@@ -1018,6 +1018,51 @@ Build unlimited analysis depth via progressive artifact updates.
             frappe.throw(frappe._("Failed to {0} plugin '{1}': {2}").format(action, plugin_name, str(e)))
 
 
+# Module-level API functions for frontend access
+@frappe.whitelist()
+def api_get_sse_bridge_status():
+    """API endpoint to get SSE bridge status"""
+    try:
+        settings = frappe.get_single("Assistant Core Settings")
+        return settings.get_sse_bridge_status()
+    except Exception as e:
+        frappe.log_error(f"Failed to get SSE bridge status: {str(e)}")
+        return {
+            "success": False,
+            "status": "error",
+            "message": f"Failed to get status: {str(e)}",
+            "enabled": False
+        }
+
+
+@frappe.whitelist()
+def api_start_sse_bridge():
+    """API endpoint to start SSE bridge"""
+    try:
+        settings = frappe.get_single("Assistant Core Settings")
+        return settings.start_sse_bridge()
+    except Exception as e:
+        frappe.log_error(f"Failed to start SSE bridge: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to start: {str(e)}"
+        }
+
+
+@frappe.whitelist()
+def api_stop_sse_bridge():
+    """API endpoint to stop SSE bridge"""
+    try:
+        settings = frappe.get_single("Assistant Core Settings")
+        return settings.stop_sse_bridge()
+    except Exception as e:
+        frappe.log_error(f"Failed to stop SSE bridge: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to stop: {str(e)}"
+        }
+
+
 def get_context(context):
     context.title = _("assistant Server Settings")
     context.docs = _("Manage the settings for the assistant Server.")

@@ -469,18 +469,27 @@ eventSource.addEventListener('ping', (event) => {
 
 ### Common Issues
 
-#### 1. Port Conflicts
+#### 1. SSE Bridge Won't Start from UI
+**Problem**: Start button doesn't work or shows errors
+**Solution**:
+1. Check **Enable SSE Bridge** is checked in settings
+2. Verify dependencies: `pip install frappe_assistant_core[sse-bridge]`
+3. Check port availability: `lsof -i :8080`
+4. Review Frappe error logs for detailed messages
+5. Try manual start for debugging
+
+#### 2. Port Conflicts
 **Problem**: `[Errno 48] address already in use`
-**Solution**: 
+**Solution**:
 ```bash
 # Check what's using the port
 lsof -i :8080
 
-# Use a different port
-PORT=8081 python -c "from frappe_assistant_core.services.sse_bridge import main; main()"
+# Change port in Assistant Core Settings or use environment
+SSE_BRIDGE_PORT=8081 python -c "from frappe_assistant_core.services.sse_bridge import main; main()"
 ```
 
-#### 2. Import Errors
+#### 3. Import Errors
 **Problem**: `ModuleNotFoundError: No module named 'fastapi'`
 **Solution**:
 ```bash
@@ -488,21 +497,36 @@ PORT=8081 python -c "from frappe_assistant_core.services.sse_bridge import main;
 pip install frappe_assistant_core[sse-bridge]
 ```
 
-#### 3. Authentication Failures
+#### 4. Process Management Issues
+**Problem**: SSE bridge process not stopping properly
+**Solution**:
+1. Use **Stop SSE Bridge** button in settings
+2. Check process status with **Check SSE Bridge Status**
+3. Manual cleanup if needed:
+```bash
+# Find and kill process
+ps aux | grep sse_bridge
+kill -TERM <pid>
+
+# Clean up PID file
+rm -f /tmp/frappe_sse_bridge.pid
+```
+
+#### 5. Authentication Failures
 **Problem**: `401 Invalid or missing authorization token`
 **Solutions**:
 ```bash
 # Check Bearer token format
 curl -H "Authorization: Bearer your-actual-token" ...
 
-# Check API key format  
+# Check API key format
 curl -H "Authorization: token key:secret" ...
 
 # Verify Frappe server is accessible
 curl https://your-site.com/api/method/frappe.auth.get_logged_user
 ```
 
-#### 4. Connection Issues
+#### 6. Connection Issues
 **Problem**: SSE connections dropping frequently
 **Solutions**:
 - Check network stability
@@ -513,13 +537,13 @@ curl https://your-site.com/api/method/frappe.auth.get_logged_user
 #### 5. Testing Ping Functionality
 **Testing connection health with ping:**
 ```bash
-# First establish SSE connection to get session_id
+# First establish SSE connection to get connection_id
 # Then send ping request
 curl -X POST \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"ping","id":1}' \
-  "http://localhost:8080/mcp/messages?session_id=YOUR_SESSION_ID"
+  "http://localhost:8080/mcp/messages?cid=YOUR_CONNECTION_ID"
 
 # Expected response (via SSE stream):
 # event: message
@@ -681,10 +705,29 @@ Supports multiple authentication methods:
 
 After setting up the SSE Bridge:
 
-1. **Configure Claude**: Update your Claude MCP configuration to use the SSE bridge
-2. **Test Integration**: Verify MCP communication works end-to-end
-3. **Monitor Performance**: Set up monitoring for production deployments
-4. **Scale as Needed**: Deploy multiple instances for high availability
+1. **Configure via Frappe UI**: Use Assistant Core Settings for easy management
+2. **Configure Claude**: Update your Claude MCP configuration to use the SSE bridge
+3. **Test Integration**: Verify MCP communication works end-to-end
+4. **Monitor Performance**: Use the built-in status monitoring in Frappe
+5. **Scale as Needed**: Deploy multiple instances for high availability
+
+## UI Management Summary
+
+The SSE Bridge is now fully integrated into Frappe's Assistant Core Settings:
+
+### Key Features:
+- **✅ One-Click Start/Stop**: Use buttons in Assistant Core Settings
+- **✅ Real-time Status**: Monitor connection status and health
+- **✅ Configuration Management**: All settings stored in Frappe DocType
+- **✅ Process Management**: Independent process with PID file tracking
+- **✅ Debug Toggle**: Enable/disable debug mode via checkbox
+
+### Access Path:
+1. Go to **Desk** → **Assistant Core Settings**
+2. Navigate to **SSE Bridge Configuration** section
+3. Use the control buttons and status displays
+
+This integration makes the SSE Bridge production-ready while maintaining the ease of development and testing.
 
 For additional help, refer to:
 - [TECHNICAL_DOCUMENTATION.md](./TECHNICAL_DOCUMENTATION.md) - Deep technical details

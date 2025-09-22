@@ -7,9 +7,15 @@
 pip install frappe_assistant_core[sse-bridge]
 ```
 
-### Start with Bench
+### Configure in Frappe
+1. Go to **Assistant Core Settings** in Frappe
+2. Enable **"Enable SSE Bridge"** checkbox
+3. Configure port (default: 8080) and host (default: 0.0.0.0)
+4. Use the **Start SSE Bridge** button to launch
+
+### Alternative: Start with Bench
 ```bash
-bench start  # SSE bridge runs automatically on port 8080
+bench start  # SSE bridge runs automatically if enabled
 ```
 
 ### Health Check
@@ -24,17 +30,25 @@ curl -X POST \
   -H "Authorization: Bearer TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"ping","id":1}' \
-  "http://localhost:8080/mcp/messages?session_id=SESSION_ID"
+  "http://localhost:8080/mcp/messages?cid=CONNECTION_ID"
 ```
 
 ## 📋 Configuration
 
-### Environment Variables
+### Primary: Assistant Core Settings (Recommended)
+1. Navigate to **Assistant Core Settings** doctype
+2. Configure under **"SSE Bridge Configuration"** section:
+   - **Enable SSE Bridge**: Master toggle
+   - **SSE Bridge Port**: Server port (default: 8080)
+   - **SSE Bridge Host**: Bind address (default: 0.0.0.0)
+   - **Enable SSE Bridge Debug Mode**: Debug logging
+
+### Alternative: Environment Variables
 ```bash
-export HOST=0.0.0.0      # Server address
-export PORT=8080         # Server port (avoid 8000)
-export DEBUG=false       # Debug mode
-export LOG_LEVEL=info    # Logging level
+export SSE_BRIDGE_ENABLED=true   # Enable/disable bridge
+export SSE_BRIDGE_HOST=0.0.0.0   # Server address
+export SSE_BRIDGE_PORT=8080      # Server port
+export SSE_BRIDGE_DEBUG=false    # Debug mode
 ```
 
 ### Development (.env file)
@@ -48,10 +62,20 @@ FRAPPE_API_SECRET=your_secret
 
 ## 🔧 Manual Operations
 
+### Start via Frappe UI (Recommended)
+1. Go to **Assistant Core Settings**
+2. Click **"Start SSE Bridge"** button
+3. Monitor status in the **"SSE Bridge Status"** section
+
 ### Start Manually
 ```bash
 python -c "from frappe_assistant_core.services.sse_bridge import main; main()"
 ```
+
+### Stop via Frappe UI
+1. Go to **Assistant Core Settings**
+2. Click **"Stop SSE Bridge"** button
+3. Confirms graceful shutdown
 
 ### Test Module Import
 ```bash
@@ -101,24 +125,27 @@ CMD ["python", "-c", "from frappe_assistant_core.services.sse_bridge import main
 ### Bearer Token
 ```bash
 curl -H "Authorization: Bearer your-token" \
-  "http://localhost:8080/mcp/sse?server_url=https://your-site.com"
+  "http://localhost:8080/mcp/sse?server_url=https://your-site.com&device=my-device"
 ```
 
 ### API Key
 ```bash
 curl -H "Authorization: token api-key:api-secret" \
-  "http://localhost:8080/mcp/sse?server_url=https://your-site.com"
+  "http://localhost:8080/mcp/sse?server_url=https://your-site.com&device=my-device"
 ```
 
 ## 🛠️ Troubleshooting
 
 ### Common Issues
 
+**SSE Bridge not starting:**
+1. Check **Assistant Core Settings** → **Enable SSE Bridge** is checked
+2. Verify port availability: `lsof -i :8080`
+3. Check status via **"Check SSE Bridge Status"** button
+
 **Port in use:**
-```bash
-lsof -i :8080                    # Check what's using port
-PORT=8081 bench start sse_bridge # Use different port
-```
+1. Change port in **Assistant Core Settings** → **SSE Bridge Port**
+2. Or check what's using port: `lsof -i :8080`
 
 **Module not found:**
 ```bash
@@ -131,10 +158,11 @@ pip install frappe_assistant_core[sse-bridge]  # Install dependencies
 curl https://your-site.com/api/method/frappe.auth.get_logged_user
 ```
 
-**Debug mode:**
-```bash
-DEBUG=true LOG_LEVEL=debug python -c "from frappe_assistant_core.services.sse_bridge import main; main()"
-```
+**Process management:**
+- **Start**: Use "Start SSE Bridge" button in settings
+- **Stop**: Use "Stop SSE Bridge" button in settings
+- **Status**: Use "Check SSE Bridge Status" button
+- **Debug**: Enable "SSE Bridge Debug Mode" in settings
 
 ## 📊 API Endpoints
 
@@ -159,9 +187,11 @@ DEBUG=true LOG_LEVEL=debug python -c "from frappe_assistant_core.services.sse_br
 ```json
 {
   "status": "healthy",
-  "service": "frappe-assistant-core-sse-bridge", 
+  "service": "frappe-assistant-core-sse-bridge-enhanced",
   "active_connections": 5,
-  "pending_requests": 2
+  "messages_sent": 150,
+  "storage_backend": "redis",
+  "total_connections": 25
 }
 ```
 
@@ -184,7 +214,12 @@ frappe_assistant_core/
 ├── services/
 │   ├── __init__.py
 │   ├── __main__.py
-│   └── sse_bridge.py          # Main SSE bridge service
+│   ├── sse_bridge.py          # Main SSE bridge service
+│   └── config_reader.py       # Configuration coordination
+├── assistant_core/doctype/assistant_core_settings/
+│   ├── assistant_core_settings.py   # SSE bridge management
+│   ├── assistant_core_settings.js   # UI integration
+│   └── assistant_core_settings.json # DocType definition
 ├── pyproject.toml             # Dependencies: [sse-bridge]
 └── docs/
     ├── SSE_BRIDGE_INTEGRATION.md    # Complete guide

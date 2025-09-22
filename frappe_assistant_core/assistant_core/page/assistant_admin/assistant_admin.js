@@ -175,6 +175,59 @@ frappe.pages['assistant-admin'].on_page_load = function(wrapper) {
                 </div>
             </div>
 
+            <!-- SSE Bridge Status Card -->
+            <div id="sse-bridge-card" class="status-card">
+                <div class="status-header">
+                    <div class="status-title">
+                        <span id="sse-status-icon" class="status-icon"></span>
+                        <span id="sse-status-text">
+                            <i class="fa fa-broadcast-tower"></i> SSE Bridge - Loading...
+                        </span>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-success" id="start-sse-bridge" style="display:none;">
+                            <i class="fa fa-play"></i> Start
+                        </button>
+                        <button class="btn btn-warning" id="stop-sse-bridge" style="display:none;">
+                            <i class="fa fa-stop"></i> Stop
+                        </button>
+                        <button class="btn btn-info" id="check-sse-status">
+                            <i class="fa fa-refresh"></i> Status
+                        </button>
+                    </div>
+                </div>
+                <div id="sse-details" style="display:none; margin-top: 15px;">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <strong>Port:</strong> <span id="sse-port">-</span>
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Host:</strong> <span id="sse-host">-</span>
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Process ID:</strong> <span id="sse-pid">-</span>
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Connections:</strong> <span id="sse-connections">-</span>
+                        </div>
+                    </div>
+                    <div class="row" style="margin-top: 10px;">
+                        <div class="col-md-3">
+                            <strong>Messages:</strong> <span id="sse-messages">-</span>
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Storage:</strong> <span id="sse-storage">-</span>
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Enabled:</strong> <span id="sse-enabled">-</span>
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Debug:</strong> <span id="sse-debug">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Info Grid -->
             <div class="info-grid">
                 <div class="info-card">
@@ -379,20 +432,210 @@ frappe.pages['assistant-admin'].on_page_load = function(wrapper) {
         });
     }
 
+    // Load SSE Bridge status
+    function loadSSEBridgeStatus() {
+        // First check if SSE bridge is enabled
+        frappe.call({
+            method: "frappe.client.get",
+            args: {
+                doctype: "Assistant Core Settings"
+            },
+            callback: function(response) {
+                if (response.message) {
+                    // Check if SSE bridge is enabled first
+                    if (!response.message.sse_bridge_enabled) {
+                        updateSSEBridgeUI({
+                            success: true,
+                            status: "disabled",
+                            message: "SSE bridge is disabled in settings",
+                            enabled: false,
+                            port: response.message.sse_bridge_port || 8080,
+                            host: response.message.sse_bridge_host || "0.0.0.0"
+                        });
+                        return;
+                    }
+
+                    // SSE bridge is enabled, get actual status
+                    frappe.call({
+                        method: "frappe_assistant_core.assistant_core.doctype.assistant_core_settings.assistant_core_settings.api_get_sse_bridge_status",
+                        callback: function(statusResponse) {
+                            updateSSEBridgeUI(statusResponse.message);
+                        },
+                        error: function() {
+                            updateSSEBridgeUI({
+                                success: false,
+                                status: "error",
+                                message: "Failed to get SSE bridge status",
+                                enabled: response.message.sse_bridge_enabled
+                            });
+                        }
+                    });
+                }
+            },
+            error: function() {
+                updateSSEBridgeUI({
+                    success: false,
+                    status: "error",
+                    message: "Failed to load Assistant Core Settings",
+                    enabled: false
+                });
+            }
+        });
+    }
+
+    // Update SSE Bridge UI
+    function updateSSEBridgeUI(status) {
+        const card = $('#sse-bridge-card');
+        const statusIcon = $('#sse-status-icon');
+        const statusText = $('#sse-status-text');
+        const details = $('#sse-details');
+        const startBtn = $('#start-sse-bridge');
+        const stopBtn = $('#stop-sse-bridge');
+
+        // Update status display
+        statusText.html(`<i class="fa fa-broadcast-tower"></i> SSE Bridge - ${status.message || status.status}`);
+
+        if (status.status === 'running') {
+            card.removeClass('disabled').addClass('enabled');
+            statusIcon.removeClass('red').addClass('green');
+            startBtn.hide();
+            stopBtn.show();
+            details.show();
+
+            // Update details
+            $('#sse-port').text(status.port || '-');
+            $('#sse-host').text(status.host || '-');
+            $('#sse-pid').text(status.process_id || '-');
+            $('#sse-connections').text(status.server_info?.active_connections || '0');
+            $('#sse-messages').text(status.server_info?.messages_sent || '0');
+            $('#sse-storage').text(status.server_info?.storage_backend || 'memory');
+            $('#sse-enabled').html(status.enabled ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>');
+            $('#sse-debug').html('<span class="text-muted">N/A</span>');
+
+        } else if (status.status === 'disabled') {
+            card.removeClass('enabled').addClass('disabled');
+            statusIcon.removeClass('green').addClass('red');
+            startBtn.hide();
+            stopBtn.hide();
+            details.show();
+
+            // Show configuration info even when disabled
+            $('#sse-port').text(status.port || '-');
+            $('#sse-host').text(status.host || '-');
+            $('#sse-pid').text('N/A (Disabled)');
+            $('#sse-connections').text('N/A');
+            $('#sse-messages').text('N/A');
+            $('#sse-storage').text('N/A');
+            $('#sse-enabled').html('<span class="text-warning">Disabled - <a href="#Form/Assistant Core Settings">Enable in Settings</a></span>');
+            $('#sse-debug').text('N/A');
+
+        } else if (status.status === 'stopped' || status.status === 'error') {
+            card.removeClass('enabled').addClass('disabled');
+            statusIcon.removeClass('green').addClass('red');
+            startBtn.show();
+            stopBtn.hide();
+            details.hide();
+
+        } else if (status.status === 'starting') {
+            card.removeClass('disabled enabled');
+            statusIcon.removeClass('green red');
+            startBtn.hide();
+            stopBtn.show();
+            details.hide();
+        }
+
+        // Always show enabled status if available
+        if (status.enabled !== undefined) {
+            $('#sse-enabled').html(status.enabled ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>');
+        }
+    }
+
+    // SSE Bridge control functions
+    function startSSEBridge() {
+        startBtn = $('#start-sse-bridge');
+        startBtn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Starting...');
+
+        frappe.call({
+            method: "frappe_assistant_core.assistant_core.doctype.assistant_core_settings.assistant_core_settings.api_start_sse_bridge",
+            callback: function(response) {
+                if (response.message && response.message.success) {
+                    frappe.show_alert({
+                        message: 'SSE Bridge started successfully',
+                        indicator: 'green'
+                    });
+                    setTimeout(loadSSEBridgeStatus, 2000); // Reload status after 2 seconds
+                } else {
+                    frappe.show_alert({
+                        message: 'Failed to start SSE Bridge: ' + (response.message?.message || 'Unknown error'),
+                        indicator: 'red'
+                    });
+                }
+            },
+            error: function(xhr) {
+                frappe.show_alert({
+                    message: 'Error starting SSE Bridge: ' + (xhr.responseJSON?.message || 'Unknown error'),
+                    indicator: 'red'
+                });
+            },
+            always: function() {
+                startBtn.prop('disabled', false).html('<i class="fa fa-play"></i> Start');
+                loadSSEBridgeStatus();
+            }
+        });
+    }
+
+    function stopSSEBridge() {
+        stopBtn = $('#stop-sse-bridge');
+        stopBtn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Stopping...');
+
+        frappe.call({
+            method: "frappe_assistant_core.assistant_core.doctype.assistant_core_settings.assistant_core_settings.api_stop_sse_bridge",
+            callback: function(response) {
+                if (response.message && response.message.success) {
+                    frappe.show_alert({
+                        message: 'SSE Bridge stopped successfully',
+                        indicator: 'orange'
+                    });
+                } else {
+                    frappe.show_alert({
+                        message: 'Failed to stop SSE Bridge: ' + (response.message?.message || 'Unknown error'),
+                        indicator: 'red'
+                    });
+                }
+            },
+            error: function(xhr) {
+                frappe.show_alert({
+                    message: 'Error stopping SSE Bridge: ' + (xhr.responseJSON?.message || 'Unknown error'),
+                    indicator: 'red'
+                });
+            },
+            always: function() {
+                stopBtn.prop('disabled', false).html('<i class="fa fa-stop"></i> Stop');
+                loadSSEBridgeStatus();
+            }
+        });
+    }
+
     // Event handlers
     $('#open-settings').on('click', function() {
         frappe.set_route('Form', 'Assistant Core Settings');
     });
+
+    $('#start-sse-bridge').on('click', startSSEBridge);
+    $('#stop-sse-bridge').on('click', stopSSEBridge);
+    $('#check-sse-status').on('click', loadSSEBridgeStatus);
 
     // Initial load
     loadAssistantStatus();
     loadPluginInfo();
     loadToolRegistry();
     loadRecentActivity();
+    loadSSEBridgeStatus(); // Load SSE bridge status
 
     // Refresh every 30 seconds
     setInterval(function() {
         loadAssistantStatus();
         loadRecentActivity();
+        loadSSEBridgeStatus(); // Also refresh SSE bridge status
     }, 30000);
 };
