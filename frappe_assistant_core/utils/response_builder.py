@@ -409,7 +409,7 @@ The analysis contains extensive output that benefits from artifact presentation 
             if raw_result.get("data") and len(raw_result["data"]) > 0:
                 text += "**Sample Results (first 3 rows):**\n"
                 for i, row in enumerate(raw_result["data"][:3]):
-                    text += f"Row {i+1}: {str(row)[:200]}{'...' if len(str(row)) > 200 else ''}\n"
+                    text += f"Row {i + 1}: {str(row)[:200]}{'...' if len(str(row)) > 200 else ''}\n"
                 text += "\n"
 
         else:

@@ -513,7 +513,7 @@ class ExecutePythonCode(BaseTool):
                 error_msg = f"""Import statements detected that are not available or needed:
 
 ❌ Problematic imports found:
-{chr(10).join(f'   Line {line_num}: {stmt}' for line_num, stmt in problematic_imports)}
+{chr(10).join(f"   Line {line_num}: {stmt}" for line_num, stmt in problematic_imports)}
 
 ✅ Available pre-loaded libraries (use directly, no imports needed):
    • pd (pandas) - Data manipulation

@@ -54,7 +54,7 @@ def validate_dashboard_config(config: Dict[str, Any]) -> Tuple[bool, Optional[st
         for i, chart in enumerate(config["charts"]):
             is_valid, error = validate_chart_config(chart)
             if not is_valid:
-                return False, f"Chart {i+1}: {error}"
+                return False, f"Chart {i + 1}: {error}"
 
         return True, None
 

@@ -405,7 +405,7 @@ class BaseTool(ABC):
             # Truncate large lists but keep first few items
             if len(data) > 10:
                 return [self._sanitize_data(item) for item in data[:3]] + [
-                    f"... and {len(data)-3} more items"
+                    f"... and {len(data) - 3} more items"
                 ]
             else:
                 return [self._sanitize_data(item) for item in data]

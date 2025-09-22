@@ -551,23 +551,23 @@ Build unlimited analysis depth via progressive artifact updates.
                 plugin_icon = category_icons.get(plugin_name, "fa-puzzle-piece")
 
                 html_parts.append(f"""
-                <div class="plugin-card border rounded p-3 mb-3" style="background: {'#f8f9fa' if is_enabled else '#ffffff'}; border-left: 4px solid {'#28a745' if is_enabled else '#6c757d'};">
+                <div class="plugin-card border rounded p-3 mb-3" style="background: {"#f8f9fa" if is_enabled else "#ffffff"}; border-left: 4px solid {"#28a745" if is_enabled else "#6c757d"};">
                     <div class="row align-items-center">
                         <div class="col-md-9">
                             <div class="d-flex align-items-center mb-2">
                                 <i class="fa {plugin_icon} text-primary mr-2" style="font-size: 1.2em;"></i>
                                 <h6 class="mb-0">
-                                    {plugin.get('display_name', plugin_name.replace('_', ' ').title())}
+                                    {plugin.get("display_name", plugin_name.replace("_", " ").title())}
                                     <span class="badge {status_badge} ml-2">{status_text}</span>
                                 </h6>
                             </div>
-                            <p class="text-muted mb-2 small">{plugin.get('description', 'Advanced tools and functionality for Frappe Assistant')}</p>
+                            <p class="text-muted mb-2 small">{plugin.get("description", "Advanced tools and functionality for Frappe Assistant")}</p>
                             <div class="d-flex align-items-center">
                                 <small class="text-info mr-3">
                                     <i class="fa fa-tools"></i> {active_tool_count}/{tools_count} tools active
                                 </small>
                                 <small class="text-muted mr-3">
-                                    <i class="fa fa-tag"></i> v{plugin.get('version', '1.0.0')}
+                                    <i class="fa fa-tag"></i> v{plugin.get("version", "1.0.0")}
                                 </small>
                                 <small class="text-success">
                                     <i class="fa fa-shield-alt"></i> Verified
@@ -614,10 +614,10 @@ Build unlimited analysis depth via progressive artifact updates.
                                         <div class="d-flex justify-content-between align-items-center">
                                             <span>
                                                 <i class="fa {tool_icon} text-{tool_status}"></i>
-                                                <strong>{tool_name.replace('_', ' ').title()}</strong>
+                                                <strong>{tool_name.replace("_", " ").title()}</strong>
                                             </span>
                                             <span class="badge badge-{tool_status} badge-sm">
-                                                {'Active' if is_enabled else 'Inactive'}
+                                                {"Active" if is_enabled else "Inactive"}
                                             </span>
                                         </div>
                                     </div>
@@ -649,10 +649,10 @@ Build unlimited analysis depth via progressive artifact updates.
                                     <div class="d-flex justify-content-between align-items-center">
                                         <span>
                                             <i class="fa {tool_icon} text-{tool_status}"></i>
-                                            <strong>{plugin_tool.replace('_', ' ').title()}</strong>
+                                            <strong>{plugin_tool.replace("_", " ").title()}</strong>
                                         </span>
                                         <span class="badge badge-{tool_status} badge-sm">
-                                            {'Active' if is_enabled else 'Inactive'}
+                                            {"Active" if is_enabled else "Inactive"}
                                         </span>
                                     </div>
                                 </div>
@@ -738,23 +738,23 @@ Build unlimited analysis depth via progressive artifact updates.
                     <div class="col-md-6 mb-3 tool-item"
                          data-tool-name="{tool_name.lower()}"
                          data-plugin="{plugin_name.lower()}"
-                         data-status="{'active' if is_plugin_enabled else 'inactive'}">
-                        <div class="border rounded p-3 h-100" style="background: {'#f8f9fa' if is_plugin_enabled else '#ffffff'};">
+                         data-status="{"active" if is_plugin_enabled else "inactive"}">
+                        <div class="border rounded p-3 h-100" style="background: {"#f8f9fa" if is_plugin_enabled else "#ffffff"};">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <h6 class="mb-1">
                                     <i class="fa fa-tool text-primary"></i>
-                                    {tool_name.replace('_', ' ').title()}
+                                    {tool_name.replace("_", " ").title()}
                                 </h6>
                                 <span class="badge badge-{tool_status}">{tool_status_text}</span>
                             </div>
                             <p class="text-muted small mb-2">{tool_desc}</p>
                             <div class="d-flex justify-content-between align-items-center">
                                 <small class="text-info">
-                                    <i class="fa fa-puzzle-piece"></i> {plugin_name.replace('_', ' ').title()}
+                                    <i class="fa fa-puzzle-piece"></i> {plugin_name.replace("_", " ").title()}
                                 </small>
                                 <small class="text-muted">
-                                    <i class="fa fa-{'check-circle' if is_plugin_enabled else 'times-circle'}"></i>
-                                    {'Ready' if is_plugin_enabled else 'Disabled'}
+                                    <i class="fa fa-{"check-circle" if is_plugin_enabled else "times-circle"}"></i>
+                                    {"Ready" if is_plugin_enabled else "Disabled"}
                                 </small>
                             </div>
                         </div>
@@ -775,24 +775,24 @@ Build unlimited analysis depth via progressive artifact updates.
                     html_parts.append(f"""
                     <div class="col-md-6 mb-3 tool-item"
                          data-tool-name="{tool_name.lower()}"
-                         data-plugin="{tool_data.get('source_app', 'custom_tools').lower()}"
-                         data-status="{'active' if is_plugin_enabled else 'inactive'}">
-                        <div class="border rounded p-3 h-100" style="background: {'#f8f9fa' if is_plugin_enabled else '#ffffff'};">
+                         data-plugin="{tool_data.get("source_app", "custom_tools").lower()}"
+                         data-status="{"active" if is_plugin_enabled else "inactive"}">
+                        <div class="border rounded p-3 h-100" style="background: {"#f8f9fa" if is_plugin_enabled else "#ffffff"};">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <h6 class="mb-1">
                                     <i class="fa fa-tool text-primary"></i>
-                                    {tool_name.replace('_', ' ').title()}
+                                    {tool_name.replace("_", " ").title()}
                                 </h6>
                                 <span class="badge badge-{tool_status}">{tool_status_text}</span>
                             </div>
                             <p class="text-muted small mb-2">{tool_desc}</p>
                             <div class="d-flex justify-content-between align-items-center">
                                 <small class="text-info">
-                                    <i class="fa fa-puzzle-piece"></i> {tool_data.get('source_app', 'External').replace('_', ' ').title()}
+                                    <i class="fa fa-puzzle-piece"></i> {tool_data.get("source_app", "External").replace("_", " ").title()}
                                 </small>
                                 <small class="text-muted">
-                                    <i class="fa fa-{'check-circle' if is_plugin_enabled else 'times-circle'}"></i>
-                                    {'Ready' if is_plugin_enabled else 'Disabled'}
+                                    <i class="fa fa-{"check-circle" if is_plugin_enabled else "times-circle"}"></i>
+                                    {"Ready" if is_plugin_enabled else "Disabled"}
                                 </small>
                             </div>
                         </div>
@@ -1031,7 +1031,7 @@ def api_get_sse_bridge_status():
             "success": False,
             "status": "error",
             "message": f"Failed to get status: {str(e)}",
-            "enabled": False
+            "enabled": False,
         }
 
 
@@ -1043,10 +1043,7 @@ def api_start_sse_bridge():
         return settings.start_sse_bridge()
     except Exception as e:
         frappe.log_error(f"Failed to start SSE bridge: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Failed to start: {str(e)}"
-        }
+        return {"success": False, "message": f"Failed to start: {str(e)}"}
 
 
 @frappe.whitelist()
@@ -1057,10 +1054,7 @@ def api_stop_sse_bridge():
         return settings.stop_sse_bridge()
     except Exception as e:
         frappe.log_error(f"Failed to stop SSE bridge: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Failed to stop: {str(e)}"
-        }
+        return {"success": False, "message": f"Failed to stop: {str(e)}"}
 
 
 def get_context(context):

@@ -295,7 +295,7 @@ Build unlimited analysis depth via progressive artifact updates."""
 
 📋 **MANDATORY WORKFLOW (Admin Configuration):**
 1. **CREATE ARTIFACT** - Type: {artifact_type}
-2. **ADD SECTIONS:** {', '.join(sections)}
+2. **ADD SECTIONS:** {", ".join(sections)}
 3. **STREAM FULL RESULTS** to artifact sections
 4. **KEEP RESPONSE MINIMAL** (only summary/confirmation)
 
@@ -370,7 +370,7 @@ Result is {chars:,} characters - too large for conversation display.
 This result may benefit from artifact streaming for better organization.
 
 **Suggested Artifact Type:** {artifact_type}
-**Suggested Sections:** {', '.join(sections)}
+**Suggested Sections:** {", ".join(sections)}
 
 ⚙️ **Custom Guidelines:**
 {custom_instructions}
