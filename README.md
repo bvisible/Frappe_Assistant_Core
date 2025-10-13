@@ -24,13 +24,13 @@ Get up and running in 3 steps:
 ```bash
 # 1. Get the app
 cd frappe-bench
-bench get-app https://github.com/buildswithpaul/Frappe_Assistant_Core
+bench get-app https://github.com/bvisible/Frappe_Assistant_Core
 
 # 2. Install on your site  
-bench --site [site-name] install-app frappe_assistant_core
+bench --site prod.local install-app frappe_assistant_core
 
 # 3. Enable the assistant
-bench --site [site-name] set-config assistant_enabled 1
+bench --site prod.local set-config assistant_enabled 1
 ```
 
 **That's it!** Your ERPNext system is now accessible to any MCP-compatible LLM.
