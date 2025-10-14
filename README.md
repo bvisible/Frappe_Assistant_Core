@@ -29,8 +29,6 @@ bench get-app https://github.com/buildswithpaul/Frappe_Assistant_Core
 # 2. Install on your site  
 bench --site [site-name] install-app frappe_assistant_core
 
-# 3. Enable the assistant
-bench --site [site-name] set-config assistant_enabled 1
 ```
 
 **That's it!** Your ERPNext system is now accessible to any MCP-compatible LLM.
@@ -45,7 +43,7 @@ Robust protocol handler that exposes ERPNext functionality through standardized 
 ### 📦 **Client Integration Packages** 
 Ready-to-use integrations including DXT file generation for Claude Desktop setup.
 
-### 🛠️ **20+ Built-in Tools**
+### 🛠️ **21 Built-in Tools**
 Document CRUD, search, reporting, analytics, Python execution, and visualization capabilities.
 
 ![Available Tools](screenshots/tools-available.png)
@@ -56,6 +54,9 @@ Extensible framework for custom tools, external app integration, and business-sp
 
 ![Admin Interface](screenshots/admin-interface.png)
 *Professional admin interface for plugin management and configuration*
+
+### 🔐 **OAuth 2.0 / OIDC Authentication**
+Full OAuth 2.0 and OpenID Connect implementation with Dynamic Client Registration (RFC 7591), PKCE support, and standardized discovery endpoints for seamless integration with MCP Inspector and third-party tools.
 
 ### 🔒 **Enterprise Security Layer**
 Authentication, ERPNext permissions integration, audit logging, and role-based access.
@@ -304,84 +305,167 @@ graph LR
 
 ## 🚀 Getting Started
 
-### Option 1: Claude Desktop (One-Click Setup)
+Ready to connect your LLM to ERPNext? Follow these simple steps:
 
-Generate a DXT file for instant Claude Desktop integration:
+### Step 1: Get Your MCP Endpoint URL
 
-```bash
-# Generate DXT file for your site
-bench --site yoursite execute frappe_assistant_core.client_packages.generate_dxt_file
+1. **Open FAC Admin Page**
+   - After installation, go to: **Desk → Tools → FAC Admin**
+   - Or navigate directly to: `https://your-site.com/app/fac-admin`
 
-# Install the generated .dxt file in Claude Desktop
-# Double-click the file or drag to Claude Desktop
-```
+2. **Copy Your MCP Endpoint**
+   - On the FAC Admin page, you'll see your **MCP Endpoint URL**
+   - It looks like: `https://your-site.com/api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp`
+   - Copy this URL - you'll need it in the next step
 
-![DXT File Generation](screenshots/dxt-generation-demo.png)
-*One command generates a complete Claude Desktop integration file*
+![FAC Admin Page](screenshots/fac-admin-endpoint.png)
+*Get your MCP endpoint URL from the FAC Admin page*
 
-### Option 2: Manual MCP Configuration
+### Step 2: Add MCP Server to Your LLM
 
-Add to your Claude Desktop MCP configuration:
+Choose your LLM platform and follow the instructions:
 
-```json
-{
-  "mcpServers": {
-    "frappe-assistant": {
-      "command": "python",
-      "args": ["/path/to/frappe_assistant_stdio_bridge.py"],
-      "env": {
-        "FRAPPE_SITE": "your-site.localhost", 
-        "FRAPPE_API_KEY": "your-api-key",
-        "FRAPPE_API_SECRET": "your-api-secret"
-      }
-    }
-  }
-}
-```
+#### 🔷 **Claude Desktop** (Recommended)
 
-### Option 3: Custom LLM Integration
+1. **In Claude Desktop**, click the settings icon (⚙️) in the bottom left
+2. Click **"Connectors"**
+3. Click **"+ Add Custom Connector""** button
+4. Fill in the details:
+   - **Name**: `Frappe Assistant Core` (or any name you prefer)
+   - **URL**: Paste your MCP endpoint URL from Step 1
+5. Click **"Add"**
 
-For other LLMs or custom applications:
+![Claude Add Server](screenshots/claude-add-server.png)
 
-```python
-# Connect via MCP protocol
-import mcp_client
+#### 🟢 **ChatGPT** (Plus Users Only)
 
-client = mcp_client.connect("http://yoursite.com/api/method/frappe_assistant_core.api.mcp.handle_request")
-tools = client.list_tools()
-result = client.call_tool("list_documents", {"doctype": "Customer"})
-```
+> **Note**: Custom connectors are only available for ChatGPT Plus and above plan users with Developer Mode enabled
 
-### Test Your Integration
+1. **In ChatGPT**, open the side panel
+2. Go to **Connectors** menu
+3. Click **"Create"** button
+4. Fill in the connector details:
+   - **Name**: `Frappe Assistant Core` (or any name you prefer)
+   - **URL**: Paste your MCP endpoint URL from Step 1
+5. Click **"Create"**
 
-Once connected, try these commands with any compatible LLM:
+![ChatGPT Connector](screenshots/chatgpt-connector.png)
+
+#### 🌐 **Claude Web** (claude.ai)
+
+1. **On Claude Web**, click your profile icon
+2. Go to **Settings → Integrations**
+3. Click **"Add Custom Connector"**
+4. Fill in:
+   - **Name**: `Frappe Assistant`
+   - **URL**: Paste your MCP endpoint URL from Step 1
+5. Click **"Add"**
+
+### Step 3: Authenticate & Connect
+
+1. **Click "Connect"** in your LLM client
+2. **You'll be redirected** to your Frappe login page
+3. **Login** with your Frappe username and password
+4. **Click "Authenticate"** to authorize the LLM to access your ERPNext data
+5. **Done!** You'll be redirected back to your LLM
+
+![OAuth Flow](screenshots/oauth-authentication-flow.png)
+*Secure OAuth 2.0 authentication - login once, access anytime*
+
+### Step 4: Start Using Your Tools!
+
+Your LLM can now access ERPNext! Try these commands:
 
 > "List all customers in the system"
 
 > "Create a new customer called Acme Corp with email test@acme.com"
 
-> "Show me sales data from this month and create a chart"
+> "Show me this month's sales report"
 
-![Claude Desktop Integration](screenshots/claude-integration-demo.png)
-*Natural language commands create real ERPNext documents and generate insights*
+> "What are the top 5 selling items?"
 
-The LLM will interact directly with your ERPNext data through the MCP tools.
+---
+
+### 🧪 For Developers: MCP Inspector Testing
+
+Want to test and debug your MCP server? Use the MCP Inspector tool:
+
+**1. Enable CORS for Local Testing**
+
+Add to your `site_config.json`:
+```json
+{
+  "oauth_cors_allowed_origins": "*"
+}
+```
+
+Or in **Assistant Core Settings** → OAuth tab → **Allowed Public Client Origins**: `http://localhost:6274`
+
+**2. Open MCP Inspector**
+
+- Go to: http://localhost:6274/
+- Select **"Streamable HTTP"** transport
+- Enter your **MCP Endpoint URL** from FAC Admin
+- Click **"Guided OAuth Flow"** and click **Continue** for each step
+- Login when prompted
+
+**3. Test Tools**
+
+- Browse available tools
+- Execute test calls
+- Debug request/response data
+- Monitor OAuth token flow
+
+![MCP Inspector](screenshots/mcp-inspector-demo.png)
+*MCP Inspector provides visual testing and debugging for developers*
+
+---
+
+### 📚 Advanced Integration
+
+For custom applications, advanced OAuth flows, or programmatic integration, see our comprehensive guides:
+
+- **[MCP StreamableHTTP Guide](docs/architecture/MCP_STREAMABLEHTTP_GUIDE.md)** - Complete OAuth + MCP implementation
+- **[OAuth Setup Guide](docs/getting-started/oauth/oauth_setup_guide.md)** - Detailed OAuth configuration
+- **[API Reference](docs/api/API_REFERENCE.md)** - All endpoints and protocols
+- **[Development Guide](docs/development/DEVELOPMENT_GUIDE.md)** - Build custom integrations
 
 ---
 
 ## 📚 Documentation
 
+**[📖 Complete Documentation Index](docs/README.md)** - Browse all documentation organized by category
+
+### 🚀 Quick Start Guides
 | Guide | Description |
 |-------|-------------|
-| [🏗️ Architecture](docs/ARCHITECTURE.md) | System design and plugin architecture |
-| [🔧 Tool Reference](docs/TOOL_REFERENCE.md) | Complete list of available tools |
-| [🚀 Development Guide](docs/DEVELOPMENT_GUIDE.md) | Create custom tools and plugins |
-| [🔒 Security Guide](docs/COMPREHENSIVE_SECURITY_GUIDE.md) | Security features and best practices |
-| [📖 API Reference](docs/API_REFERENCE.md) | Complete API documentation |
-| [⚡ Performance Guide](docs/PERFORMANCE.md) | Optimization and monitoring |
-| [📋 Release Notes v2.1.0](RELEASE_2.1.0.md) | Latest version features and improvements |
+| [Getting Started](docs/getting-started/GETTING_STARTED.md) | Complete setup guide for new users |
+| [Claude Desktop Quick Start](docs/getting-started/QUICK_START_CLAUDE_DESKTOP.md) | Connect Claude Desktop in 5 minutes |
+| [Migration Guide](docs/getting-started/MIGRATION_GUIDE.md) | **New!** Migrate from STDIO to OAuth |
+| [OAuth Quick Start](docs/getting-started/oauth/oauth_quick_start.md) | OAuth 2.0 setup in 2 minutes |
 
-**New to AI + ERP?** Start with our [Getting Started Guide](docs/GETTING_STARTED.md)
+### 🏗️ Architecture & Technical
+| Guide | Description |
+|-------|-------------|
+| [Architecture Overview](docs/architecture/ARCHITECTURE.md) | System design and plugin architecture |
+| [MCP StreamableHTTP Guide](docs/architecture/MCP_STREAMABLEHTTP_GUIDE.md) | **New!** OAuth + StreamableHTTP integration |
+| [Technical Documentation](docs/architecture/TECHNICAL_DOCUMENTATION.md) | Complete technical reference |
+| [Performance Guide](docs/architecture/PERFORMANCE.md) | Optimization and monitoring |
+
+### 📖 API Reference
+| Guide | Description |
+|-------|-------------|
+| [API Reference](docs/api/API_REFERENCE.md) | MCP protocol endpoints and OAuth APIs |
+| [Tool Reference](docs/api/TOOL_REFERENCE.md) | Complete catalog of all 21 available tools |
+| [OAuth Setup Guide](docs/getting-started/oauth/oauth_setup_guide.md) | Comprehensive OAuth configuration |
+
+### 🛠️ Development
+| Guide | Description |
+|-------|-------------|
+| [Development Guide](docs/development/DEVELOPMENT_GUIDE.md) | Create custom tools and plugins |
+| [External App Development](docs/development/EXTERNAL_APP_DEVELOPMENT.md) | Tools in your Frappe apps (recommended) |
+| [Plugin Development](docs/development/PLUGIN_DEVELOPMENT.md) | Build internal plugins |
+| [Test Case Creation](docs/development/TEST_CASE_CREATION_GUIDE.md) | Testing patterns and best practices |
 
 ---
 

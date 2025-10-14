@@ -45,9 +45,6 @@ dependencies = [
     # Network and API dependencies
     "requests>=2.25.0",
     "jsonschema>=4.0.0",
-    # SSE Bridge dependencies
-    "fastapi>=0.100.0",
-    "uvicorn>=0.20.0",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.6",
     "httpx>=0.24.0",
