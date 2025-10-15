@@ -255,35 +255,104 @@ class SendEmail(BaseTool):
 
 	def _improve_message(self, message: str, recipient: str) -> str:
 		"""
-		Improve message formatting with greetings and signature.
-		In a production system, this could call an LLM for better improvement.
-		For now, we'll add basic formatting.
+		Improve message formatting to be professional but natural in French.
+		Reformulates informal messages into proper sentences while keeping them concise.
 		"""
 		# Get recipient first name
 		recipient_name = recipient.split()[0] if " " in recipient else recipient.split("@")[0]
 
+		# Reformulate common informal patterns into professional French
+		improved = message.strip()
+
+		# Pattern: "venir demain à 18h" → "Je souhaiterais te voir demain à 18h."
+		if improved.startswith(("venir", "viens")):
+			improved = improved.replace("venir ", "")
+			improved = improved.replace("viens ", "")
+			improved = f"Je souhaiterais te voir {improved}."
+
+		# Pattern: "appeler moi" → "Pourrais-tu m'appeler ?"
+		elif "appel" in improved.lower() and "moi" in improved.lower():
+			improved = "Pourrais-tu m'appeler ?"
+
+		# Pattern: "envoyer document X" → "Peux-tu m'envoyer le document X ?"
+		elif improved.startswith(("envoyer", "envoie")):
+			improved = improved.replace("envoyer ", "")
+			improved = improved.replace("envoie ", "")
+			improved = f"Peux-tu m'envoyer {improved} ?"
+
+		# Pattern: "réunion demain" → "Je te propose une réunion demain."
+		elif "réunion" in improved.lower() and not improved.endswith(("?", ".", "!")):
+			improved = f"Je te propose une {improved}."
+
+		# Add proper punctuation if missing
+		if not improved.endswith((".", "?", "!")):
+			# If it's a question-like message
+			if any(word in improved.lower() for word in ["peux", "pourrai", "veux", "souhaite", "possible"]):
+				improved += " ?"
+			else:
+				improved += "."
+
+		# Capitalize first letter
+		if improved and improved[0].islower():
+			improved = improved[0].upper() + improved[1:]
+
 		# Add greeting if not present
-		if not message.lower().startswith(("bonjour", "hello", "hi", "salut")):
-			message = f"Bonjour {recipient_name},\n\n{message}"
+		if not improved.lower().startswith(("bonjour", "hello", "hi", "salut", "coucou")):
+			improved = f"Bonjour {recipient_name},\n\n{improved}"
 
 		# Add closing if not present
-		if not any(closing in message.lower() for closing in ["cordialement", "bien à vous", "merci", "regards"]):
-			message = f"{message}\n\nCordialement,"
+		if not any(closing in improved.lower() for closing in ["cordialement", "bien à vous", "merci d'avance", "à bientôt", "regards"]):
+			# Choose closing based on message tone
+			if any(word in improved.lower() for word in ["urgent", "important", "rapidement"]):
+				improved = f"{improved}\n\nMerci d'avance,"
+			else:
+				improved = f"{improved}\n\nCordialement,"
 
 		# Add sender signature
 		sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or "NORA Assistant"
-		if sender_name not in message:
-			message = f"{message}\n{sender_name}"
+		if sender_name not in improved:
+			improved = f"{improved}\n{sender_name}"
 
-		return message
+		return improved
 
 	def _generate_subject(self, message: str) -> str:
-		"""Generate subject from message content"""
-		# Take first sentence or first 50 chars as subject
-		first_line = message.split("\n")[0]
-		if len(first_line) > 50:
-			return first_line[:47] + "..."
-		return first_line or "Message de NORA"
+		"""Generate professional subject from message content"""
+		# Clean message for subject extraction
+		msg_lower = message.lower().strip()
+
+		# Pattern-based subject generation for common cases
+		if msg_lower.startswith(("venir", "viens")):
+			return "Invitation pour demain"
+		elif "réunion" in msg_lower:
+			return "Proposition de réunion"
+		elif "appel" in msg_lower:
+			return "Demande d'appel"
+		elif "envoyer" in msg_lower or "envoie" in msg_lower:
+			return "Demande de document"
+		elif "question" in msg_lower:
+			return "Question"
+		elif "urgent" in msg_lower:
+			return "Message urgent"
+		elif "rendez-vous" in msg_lower or "rdv" in msg_lower:
+			return "Demande de rendez-vous"
+
+		# Default: take first sentence or first 50 chars
+		first_line = message.split("\n")[0].strip()
+
+		# Remove common prefixes that don't work well in subjects
+		for prefix in ["je ", "tu ", "il ", "elle ", "nous ", "vous ", "ils ", "elles "]:
+			if first_line.lower().startswith(prefix):
+				first_line = first_line[len(prefix):]
+				break
+
+		# Capitalize and limit length
+		if first_line:
+			first_line = first_line[0].upper() + first_line[1:] if len(first_line) > 1 else first_line.upper()
+			if len(first_line) > 50:
+				return first_line[:47] + "..."
+			return first_line
+
+		return "Message de NORA"
 
 	def _generate_preview(self, recipient: str, subject: str, content: str, cc: list, bcc: list, sender: str) -> str:
 		"""Generate markdown preview of email"""
