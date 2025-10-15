@@ -138,14 +138,15 @@ class SendEmail(BaseTool):
 
 			comm.insert()
 
-			# Step 6: Generate preview
+			# Step 6: Generate preview with communication_id
 			preview_markdown = self._generate_preview(
 				recipient_email,
 				improved_subject,
 				improved_message,
 				cc_emails,
 				bcc_emails,
-				sender_name
+				sender_name,
+				comm.name  # Pass communication_id to preview
 			)
 
 			# Step 7: Send now if requested
@@ -354,7 +355,7 @@ class SendEmail(BaseTool):
 
 		return "Message de NORA"
 
-	def _generate_preview(self, recipient: str, subject: str, content: str, cc: list, bcc: list, sender: str) -> str:
+	def _generate_preview(self, recipient: str, subject: str, content: str, cc: list, bcc: list, sender: str, communication_id: str = None) -> str:
 		"""Generate markdown preview of email"""
 		preview = f"📧 **Aperçu de l'email**\n\n"
 		preview += f"**De:** {sender}\n"
@@ -371,6 +372,10 @@ class SendEmail(BaseTool):
 		# Quote the message content
 		for line in content.split("\n"):
 			preview += f"> {line}\n"
+
+		# CRITICAL: Include communication_id in preview for LLM to see
+		if communication_id:
+			preview += f"\n\n🆔 **ID:** `{communication_id}`\n"
 
 		return preview
 
