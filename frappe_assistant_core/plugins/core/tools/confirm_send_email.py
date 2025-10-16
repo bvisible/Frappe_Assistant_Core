@@ -125,8 +125,7 @@ class ConfirmSendEmail(BaseTool):
 				subject=comm.subject,
 				message=comm.content,
 				reference_doctype="Communication",
-				reference_name=comm.name,
-				send_email=True
+				reference_name=comm.name
 			)
 
 			# Update communication status
