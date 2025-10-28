@@ -300,9 +300,16 @@ Exemple 4 - Avec CC/BCC:
 				"recipient": recipient_email,
 				"subject": improved_subject,
 				"sent": False,
+				"awaiting_confirmation": True,  # NEW: Indicates waiting for user confirmation
+				"confirmation_prompt": "Voulez-vous envoyer cet email? (Répondez 'oui' pour confirmer)",  # NEW: Suggested prompt
+				"next_action": {  # NEW: Structured next action for LLM
+					"tool": "confirm_send_email",
+					"parameters": {"communication_id": comm.name},
+					"user_trigger_words": ["oui", "yes", "ok", "envoie", "send", "confirme", "d'accord", "ouais", "yeah", "okay", "go", "vas-y", "sure", "go ahead"]
+				},
 				"preview": preview_markdown,
-				"message": "Email draft created. Show preview to user and ask for confirmation.",
-				"next_step": f"Use confirm_send_email tool with communication_id='{comm.name}' to send after user approves"
+				"message": f"📧 Email draft created (ID: {comm.name}). Awaiting user confirmation to send.",
+				"next_step": f"When user confirms, call: confirm_send_email(communication_id='{comm.name}')"
 			}
 
 		except Exception as e:

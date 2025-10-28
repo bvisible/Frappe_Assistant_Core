@@ -37,7 +37,49 @@ class ConfirmSendEmail(BaseTool):
 	def __init__(self):
 		super().__init__()
 		self.name = "confirm_send_email"
-		self.description = "Send an email draft that was created by send_email tool. Use this after showing the preview to the user and they confirm they want to send. Can optionally modify subject, message, or recipients before sending. Returns success confirmation or error details."
+		self.description = """Confirme et envoie un brouillon d'email créé par send_email.
+
+⚠️ IMPORTANT - UTILISATION AUTOMATIQUE:
+Ce tool DOIT être appelé AUTOMATIQUEMENT quand:
+1. send_email a retourné un brouillon (sent=false, communication_id=xxx, awaiting_confirmation=true)
+2. Vous avez montré l'aperçu à l'utilisateur
+3. L'utilisateur CONFIRME avec: "oui", "yes", "ok", "envoie", "send", "confirme", "d'accord", etc.
+
+🔄 WORKFLOW TYPIQUE:
+1. send_email(..., send_now=false) → retourne {"communication_id": "COMM-001", "awaiting_confirmation": true}
+2. Vous montrez le preview et demandez confirmation
+3. User: "oui" (ou any confirmation word)
+4. Vous: → IMMÉDIATEMENT appeler confirm_send_email(communication_id="COMM-001")
+   ❌ NE PAS juste répondre "D'accord, je vais l'envoyer!" - APPELER LE TOOL!
+
+📝 PARAMÈTRES:
+- communication_id (REQUIS): L'ID retourné par send_email (ex: "COMM-2025-10-28-001")
+  → Vous AVEZ DÉJÀ cet ID dans la réponse précédente de send_email!
+  → Il est dans response["communication_id"]
+  → NE PAS demander à l'utilisateur de le fournir!
+- modifications (OPTIONNEL): Modifications avant envoi (subject, content, recipients, cc, bcc)
+
+✅ EXEMPLE CORRECT:
+```
+User: "Envoie email à Paul pour la réunion"
+Agent: send_email(recipient="Paul", message="...", send_now=false)
+Tool: {"communication_id": "xyz123", "preview": "...", "awaiting_confirmation": true}
+Agent: "Voici l'aperçu:\n[preview]\n\nVoulez-vous l'envoyer?"
+User: "oui"
+Agent: confirm_send_email(communication_id="xyz123")  ← AUTOMATIQUE! IMMÉDIAT!
+Tool: {"success": true, "sent": true}
+Agent: "✅ Email envoyé avec succès!"
+```
+
+❌ EXEMPLE INCORRECT:
+```
+User: "oui"
+Agent: "D'accord, je vais envoyer l'email!"  ← MAUVAIS - pas de tool call!
+```
+
+⚡ MOTS DE CONFIRMATION RECONNUS:
+Français: oui, ouais, ok, d'accord, vas-y, envoie, confirme, go
+Anglais: yes, yeah, okay, send, confirm, go ahead, sure"""
 		self.requires_permission = "Email"
 
 		self.inputSchema = {
