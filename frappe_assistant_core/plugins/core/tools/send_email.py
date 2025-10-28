@@ -60,7 +60,13 @@ class SendEmail(BaseTool):
   3. Auto-génère le sujet si non fourni (analyse du contenu du message)
   4. Crée un brouillon Communication dans Frappe
   5. Retourne aperçu formaté pour confirmation utilisateur
-  → Utiliser confirm_send_email(communication_id) pour envoyer après validation
+
+⚠️ IMPORTANT - WORKFLOW DE CONFIRMATION:
+  • send_email avec send_now=false → Crée brouillon et retourne communication_id
+  • ❌ NE JAMAIS rappeler send_email pour confirmer!
+  • ✅ TOUJOURS utiliser confirm_send_email(communication_id) pour envoyer le brouillon
+  • Exemple: send_email(..., send_now=false) retourne {communication_id: "abc123"}
+            → Ensuite: confirm_send_email(communication_id="abc123") pour envoyer
 
 💡 EXEMPLES D'UTILISATION:
 
@@ -80,7 +86,29 @@ Exemple 2 - Email direct (pas de recherche):
     improve_message=false  # Garde le message tel quel, sans amélioration
   )
 
-Exemple 3 - Avec CC/BCC:
+Exemple 3 - WORKFLOW CORRECT avec confirmation (TOUJOURS faire comme ça!):
+  # Étape 1: Créer le brouillon
+  result = send_email(
+    recipient="Jeremy",
+    subject="Réunion achats",
+    message="Es-tu dispo demain?",
+    send_now=false  # ← IMPORTANT: false pour créer brouillon
+  )
+  # result = {
+  #   "success": true,
+  #   "communication_id": "abc123xyz",
+  #   "preview": "📧 Aperçu...",
+  #   "next_step": "Use confirm_send_email tool..."
+  # }
+
+  # Étape 2: Montrer l'aperçu à l'utilisateur et demander confirmation
+  # (l'agent affiche le preview et demande "Voulez-vous envoyer?")
+
+  # Étape 3: ✅ UTILISER confirm_send_email (PAS send_email à nouveau!)
+  confirm_send_email(communication_id="abc123xyz")  # ← BON
+  # ❌ NE PAS FAIRE: send_email(..., send_now=true)  # ← MAUVAIS!
+
+Exemple 4 - Avec CC/BCC:
   send_email(
     recipient="Jeremy",
     cc="Paul, Marie",  # Supporte noms OU emails séparés par virgule
