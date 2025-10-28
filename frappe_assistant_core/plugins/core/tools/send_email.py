@@ -41,7 +41,66 @@ class SendEmail(BaseTool):
 	def __init__(self):
 		super().__init__()
 		self.name = "send_email"
-		self.description = "Prepare and send emails to users or contacts. Automatically searches for recipients by name or email, improves message formatting, creates draft in Communication DocType, and returns preview for confirmation. Use send_now=false to get preview first (recommended), then use confirm_send_email to actually send. Supports auto-generating subjects and adding professional signatures."
+		self.description = """Prépare et envoie des emails avec résolution intelligente du destinataire.
+
+📧 PARAMÈTRE RECIPIENT (destinataire):
+  • Email complet: "jeremy@example.com" → utilisé directement
+  • Nom uniquement: "Jeremy" ou "John Doe" → recherche automatique dans Users et Contacts
+  • Recherche dans les champs: full_name, first_name, last_name, email
+
+🎯 GESTION AUTOMATIQUE DES CAS SPÉCIAUX:
+  • 1 seul match trouvé → email créé automatiquement avec l'adresse trouvée
+  • Plusieurs matches → retourne liste des correspondances, demande clarification
+  • Aucun match exact → suggestions avec recherche floue (tolérance typos)
+  • Exemple: "Jeremmy" (typo) → suggère "Jeremy (85% match)"
+
+🔄 WORKFLOW COMPLET EN 5 ÉTAPES:
+  1. Résout automatiquement le destinataire (nom → email via recherche)
+  2. Améliore le message si improve_message=true (greeting, formatting, signature)
+  3. Auto-génère le sujet si non fourni (analyse du contenu du message)
+  4. Crée un brouillon Communication dans Frappe
+  5. Retourne aperçu formaté pour confirmation utilisateur
+  → Utiliser confirm_send_email(communication_id) pour envoyer après validation
+
+💡 EXEMPLES D'UTILISATION:
+
+Exemple 1 - Nom simple (résolution automatique):
+  send_email(
+    recipient="Jeremy",  # Sera résolu automatiquement en jeremy@bvisible.ch
+    subject="Réunion achats",
+    message="Es-tu dispo demain pour discuter des achats?",
+    send_now=false  # RECOMMANDÉ: crée brouillon, demande confirmation
+  )
+
+Exemple 2 - Email direct (pas de recherche):
+  send_email(
+    recipient="jeremy@example.com",  # Utilisé directement
+    message="Urgent: projet en retard!",
+    send_now=true,  # Envoie immédiatement SANS confirmation (à éviter)
+    improve_message=false  # Garde le message tel quel, sans amélioration
+  )
+
+Exemple 3 - Avec CC/BCC:
+  send_email(
+    recipient="Jeremy",
+    cc="Paul, Marie",  # Supporte noms OU emails séparés par virgule
+    bcc="admin@company.com",
+    message="Compte-rendu réunion...",
+    send_now=false
+  )
+
+⚠️ GESTION DES AMBIGUÏTÉS:
+  • Si 3 personnes nommées "Jeremy" trouvées:
+    → Tool retourne: {"success": false, "matches": [...liste...]}
+    → LLM demande: "J'ai trouvé 3 Jeremy: ..., lequel voulez-vous?"
+  • L'utilisateur précise alors l'email exact ou le nom complet
+
+⚠️ BONNES PRATIQUES:
+  1. TOUJOURS utiliser send_now=false pour demander confirmation avant envoi
+  2. Le système gère automatiquement les ambiguïtés et les typos
+  3. Si incertain sur le destinataire, le tool demandera clarification
+  4. Pour lister les utilisateurs disponibles: get_list('User', filters={'enabled': 1})
+  5. Pour chercher une personne spécifique d'abord: search_link('User', 'jeremy')"""
 		self.requires_permission = "Email"
 
 		self.inputSchema = {
@@ -92,14 +151,50 @@ class SendEmail(BaseTool):
 		bcc = arguments.get("bcc")
 
 		try:
-			# Step 1: Find recipient email
-			recipient_email = self._find_recipient(recipient)
-			if not recipient_email:
+			# Step 1: Enhanced recipient resolution
+			recipient_result = self._find_recipient(recipient)
+
+			# Case 1: Ambiguous - multiple people match
+			if isinstance(recipient_result, dict) and recipient_result.get("ambiguous"):
+				matches_list = "\n".join([
+					f"  • {m['name']} ({m['email']})"
+					for m in recipient_result["matches"]
+				])
+
 				return {
 					"success": False,
-					"error": f"Could not find recipient '{recipient}' in Users or Contacts",
-					"suggestion": "Try using full name or email address directly, or use search_link tool to find the contact first"
+					"error": f"Multiple people found matching '{recipient}'",
+					"matches": recipient_result["matches"],
+					"message": f"🤔 J'ai trouvé {len(recipient_result['matches'])} personnes nommées '{recipient}':\n\n{matches_list}\n\n💡 Veuillez préciser laquelle vous voulez contacter en utilisant:\n  • Le nom complet exact\n  • Ou l'adresse email directement",
+					"next_step": "Specify exact email or full name to disambiguate"
 				}
+
+			# Case 2: Not found but fuzzy suggestions available
+			if isinstance(recipient_result, dict) and recipient_result.get("not_found"):
+				suggestions_list = "\n".join([
+					f"  • {s['name']} ({s['email']}) - {s['similarity']}% match"
+					for s in recipient_result["suggestions"]
+				])
+
+				return {
+					"success": False,
+					"error": f"No exact match for '{recipient}'",
+					"suggestions": recipient_result["suggestions"],
+					"message": f"❓ Aucune personne trouvée nommée exactement '{recipient}'.\n\n💡 Vouliez-vous dire:\n{suggestions_list}\n\nVous pouvez utiliser un des emails ci-dessus ou chercher la personne avec search_link('User', '{recipient}').",
+					"next_step": "Use suggested email or search_link tool to find correct person"
+				}
+
+			# Case 3: Not found and no suggestions
+			if not recipient_result:
+				return {
+					"success": False,
+					"error": f"Could not find '{recipient}' in Users or Contacts",
+					"message": f"❌ Aucun utilisateur ou contact trouvé pour '{recipient}'.\n\n💡 Suggestions:\n  1. Vérifiez l'orthographe du nom\n  2. Utilisez l'adresse email complète: jeremy@example.com\n  3. Ou cherchez d'abord la personne: search_link('User', '{recipient}')\n  4. Ou listez les utilisateurs: get_list('User', filters={{'enabled': 1}})",
+					"next_step": "Provide email address or use search_link tool first"
+				}
+
+			# Case 4: Success - recipient_result is an email string
+			recipient_email = recipient_result
 
 			# Step 2: Find CC/BCC emails if provided
 			cc_emails = self._parse_recipients(cc) if cc else []
@@ -138,15 +233,14 @@ class SendEmail(BaseTool):
 
 			comm.insert()
 
-			# Step 6: Generate preview with communication_id
+			# Step 6: Generate preview
 			preview_markdown = self._generate_preview(
 				recipient_email,
 				improved_subject,
 				improved_message,
 				cc_emails,
 				bcc_emails,
-				sender_name,
-				comm.name  # Pass communication_id to preview
+				sender_name
 			)
 
 			# Step 7: Send now if requested
@@ -194,18 +288,25 @@ class SendEmail(BaseTool):
 				"error_type": "email_preparation_error"
 			}
 
-	def _find_recipient(self, recipient: str) -> str:
+	def _find_recipient(self, recipient: str):
 		"""
-		Find recipient email from name or email string.
-		Searches Users first, then Contacts.
+		Enhanced recipient resolution with ambiguity detection and fuzzy search.
+
+		Returns:
+			str: Email address if single match found
+			dict: Error/ambiguity info if multiple/no matches
+			None: No match and no suggestions
 		"""
+		frappe.logger("send_email").info(f"🔍 Searching for recipient: '{recipient}'")
+
 		# If it looks like an email, validate and return
 		if "@" in recipient:
 			# Basic email validation
 			if "." in recipient.split("@")[1]:
+				frappe.logger("send_email").info(f"✉️ Using email directly: {recipient}")
 				return recipient.strip()
 
-		# Search in Users
+		# Search in Users (increased limit to detect ambiguity)
 		users = frappe.get_all(
 			"User",
 			filters={"enabled": 1},
@@ -215,13 +316,32 @@ class SendEmail(BaseTool):
 				{"email": ["like", f"%{recipient}%"]},
 				{"name": ["like", f"%{recipient}%"]}
 			],
-			limit=1
+			limit=5  # Increased from 1 to detect multiple matches
 		)
 
-		if users:
-			return users[0].email or users[0].name
+		frappe.logger("send_email").info(f"👤 User search: found {len(users)} match(es)")
 
-		# Search in Contacts
+		# Handle multiple matches - ask user to clarify
+		if len(users) > 1:
+			frappe.logger("send_email").warning(f"⚠️ Ambiguous: {len(users)} users match '{recipient}'")
+			return {
+				"ambiguous": True,
+				"type": "User",
+				"matches": [
+					{"name": u.full_name, "email": u.email or u.name}
+					for u in users
+				]
+			}
+
+		# Single user match found
+		if len(users) == 1:
+			resolved_email = users[0].email or users[0].name
+			frappe.logger("send_email").info(
+				f"✅ Resolved '{recipient}' → '{resolved_email}' ({users[0].full_name})"
+			)
+			return resolved_email
+
+		# Search in Contacts (same pattern)
 		contacts = frappe.get_all(
 			"Contact",
 			fields=["name", "email_id", "first_name", "last_name"],
@@ -231,13 +351,131 @@ class SendEmail(BaseTool):
 				{"email_id": ["like", f"%{recipient}%"]},
 				{"name": ["like", f"%{recipient}%"]}
 			],
-			limit=1
+			limit=5
 		)
 
-		if contacts:
-			return contacts[0].email_id
+		frappe.logger("send_email").info(f"📇 Contact search: found {len(contacts)} match(es)")
 
+		# Handle multiple contact matches
+		if len(contacts) > 1:
+			frappe.logger("send_email").warning(f"⚠️ Ambiguous: {len(contacts)} contacts match '{recipient}'")
+			return {
+				"ambiguous": True,
+				"type": "Contact",
+				"matches": [
+					{
+						"name": f"{c.first_name or ''} {c.last_name or ''}".strip() or c.name,
+						"email": c.email_id
+					}
+					for c in contacts
+				]
+			}
+
+		# Single contact match found
+		if len(contacts) == 1:
+			resolved_email = contacts[0].email_id
+			contact_name = f"{contacts[0].first_name or ''} {contacts[0].last_name or ''}".strip() or contacts[0].name
+			frappe.logger("send_email").info(
+				f"✅ Resolved '{recipient}' → '{resolved_email}' ({contact_name})"
+			)
+			return resolved_email
+
+		# No exact matches - try fuzzy search
+		frappe.logger("send_email").info(f"🔎 No exact match, trying fuzzy search...")
+		fuzzy_matches = self._fuzzy_search_recipients(recipient)
+
+		if fuzzy_matches:
+			frappe.logger("send_email").info(f"💡 Fuzzy search found {len(fuzzy_matches)} suggestions")
+			return {
+				"not_found": True,
+				"suggestions": fuzzy_matches
+			}
+
+		# Absolutely no matches found
+		frappe.logger("send_email").warning(f"❌ No recipient found for '{recipient}'")
 		return None
+
+	def _fuzzy_search_recipients(self, query: str) -> list:
+		"""
+		Fuzzy search for recipients using difflib for typo tolerance.
+
+		Args:
+			query: Name to search for (e.g., "Jeremmy" with typo)
+
+		Returns:
+			list: Top 3 suggestions with similarity scores
+				[{"name": "Jeremy", "email": "jeremy@...", "similarity": 85}, ...]
+		"""
+		import difflib
+
+		frappe.logger("send_email").info(f"🔎 Fuzzy search starting for: '{query}'")
+
+		# Get all enabled users
+		all_users = frappe.get_all(
+			"User",
+			filters={"enabled": 1},
+			fields=["email", "full_name", "name"]
+		)
+
+		# Calculate similarity scores
+		matches = []
+		query_lower = query.lower()
+
+		for user in all_users:
+			name = user.full_name or user.name or ""
+			if not name:
+				continue
+
+			# Calculate similarity ratio (0.0 to 1.0)
+			similarity = difflib.SequenceMatcher(
+				None,
+				query_lower,
+				name.lower()
+			).ratio()
+
+			# Keep matches above 60% similarity threshold
+			if similarity > 0.6:
+				matches.append({
+					"name": user.full_name or user.name,
+					"email": user.email or user.name,
+					"similarity": round(similarity * 100)  # Convert to percentage
+				})
+
+		# Also search contacts
+		all_contacts = frappe.get_all(
+			"Contact",
+			fields=["email_id", "first_name", "last_name", "name"]
+		)
+
+		for contact in all_contacts:
+			name = f"{contact.first_name or ''} {contact.last_name or ''}".strip() or contact.name
+			if not name:
+				continue
+
+			similarity = difflib.SequenceMatcher(
+				None,
+				query_lower,
+				name.lower()
+			).ratio()
+
+			if similarity > 0.6:
+				matches.append({
+					"name": name,
+					"email": contact.email_id,
+					"similarity": round(similarity * 100)
+				})
+
+		# Sort by similarity (best matches first)
+		matches.sort(key=lambda x: x["similarity"], reverse=True)
+
+		# Return top 3 suggestions
+		top_matches = matches[:3]
+
+		frappe.logger("send_email").info(
+			f"💡 Fuzzy search for '{query}': {len(top_matches)} suggestions (from {len(matches)} total)"
+		)
+
+		return top_matches
 
 	def _parse_recipients(self, recipients_string: str) -> list:
 		"""Parse comma-separated recipients and find their emails"""
@@ -355,7 +593,7 @@ class SendEmail(BaseTool):
 
 		return "Message de NORA"
 
-	def _generate_preview(self, recipient: str, subject: str, content: str, cc: list, bcc: list, sender: str, communication_id: str = None) -> str:
+	def _generate_preview(self, recipient: str, subject: str, content: str, cc: list, bcc: list, sender: str) -> str:
 		"""Generate markdown preview of email"""
 		preview = f"📧 **Aperçu de l'email**\n\n"
 		preview += f"**De:** {sender}\n"
@@ -373,10 +611,6 @@ class SendEmail(BaseTool):
 		for line in content.split("\n"):
 			preview += f"> {line}\n"
 
-		# CRITICAL: Include communication_id in preview for LLM to see
-		if communication_id:
-			preview += f"\n\n🆔 **ID:** `{communication_id}`\n"
-
 		return preview
 
 	def _send_communication(self, communication_id: str) -> Dict[str, Any]:
@@ -392,7 +626,8 @@ class SendEmail(BaseTool):
 				subject=comm.subject,
 				message=comm.content,
 				reference_doctype="Communication",
-				reference_name=comm.name
+				reference_name=comm.name,
+				now=True
 			)
 
 			# Update communication status
