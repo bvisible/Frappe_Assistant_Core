@@ -309,7 +309,13 @@ Exemple 4 - Avec CC/BCC:
 				},
 				"preview": preview_markdown,
 				"message": f"📧 Email draft created (ID: {comm.name}). Awaiting user confirmation to send.",
-				"next_step": f"When user confirms, call: confirm_send_email(communication_id='{comm.name}')"
+				"next_step": f"When user confirms, call: confirm_send_email(communication_id='{comm.name}')",
+				# CRITICAL: pending_email dict for deep_chat.py to save as System message
+				"pending_email": {
+					"communication_id": comm.name,
+					"recipient": recipient_email,
+					"subject": improved_subject
+				}
 			}
 
 		except Exception as e:
