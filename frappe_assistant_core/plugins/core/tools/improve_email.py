@@ -195,11 +195,11 @@ Génère maintenant l'email professionnel pour le message ci-dessus:"""
 			for para in paragraphs:
 				para_lower = para.lower().strip()
 
-				# Skip paragraph if it's just a closing
+				# Skip paragraph if it contains any closing phrase
+				# (even if there's other text like "[Votre Nom]" after)
 				if any(phrase in para_lower for phrase in closing_phrases):
-					# Check if it's ONLY the closing (not part of a sentence)
-					if len(para_lower.split()) <= 3:  # Max 3 words = likely just closing
-						continue
+					frappe.logger().info(f"[IMPROVE_EMAIL] Skipping closing paragraph: {para[:50]}...")
+					continue
 
 				# Remove placeholder patterns from paragraph
 				for pattern in placeholder_patterns:
