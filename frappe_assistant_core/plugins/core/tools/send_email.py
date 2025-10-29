@@ -230,7 +230,47 @@ Exemple 4 - Avec CC/BCC:
 
 			# Step 3: Improve message if requested
 			if improve_message:
-				improved_message = self._improve_message(message, recipient)
+				# Use MCP improve_email tool for LLM-based improvement
+				try:
+					from frappe_assistant_core.core.tool_registry import get_tool_registry
+
+					registry = get_tool_registry()
+
+					# Extract recipient first name if available
+					recipient_name = ""
+					if recipient:
+						try:
+							recipient_name = (
+								frappe.db.get_value("User", recipient, "first_name") or ""
+							)
+						except Exception:
+							pass
+
+					# Call improve_email_message tool via MCP
+					result = registry.execute_tool(
+						tool_name="improve_email_message",
+						arguments={"message": message, "recipient_name": recipient_name},
+					)
+
+					if result.get("success"):
+						improved_message = result["improved_message"]
+						frappe.logger().info(
+							f"[SEND_EMAIL] Message improved via MCP ({result.get('method', 'unknown')})"
+						)
+					else:
+						# Fallback to old pattern-based method
+						frappe.logger().warning(
+							"[SEND_EMAIL] MCP improvement failed, using fallback"
+						)
+						improved_message = self._improve_message(message, recipient)
+
+				except Exception as e:
+					frappe.logger().error(
+						f"[SEND_EMAIL] MCP improvement error: {str(e)}"
+					)
+					# Fallback to old pattern-based method
+					improved_message = self._improve_message(message, recipient)
+
 				improved_subject = subject or self._generate_subject(message)
 			else:
 				improved_message = message
