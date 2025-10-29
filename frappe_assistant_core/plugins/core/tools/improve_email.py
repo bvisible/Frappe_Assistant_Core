@@ -115,13 +115,9 @@ RÈGLES STRICTES:
 - Commence TOUJOURS par "{greeting}"
 - Longueur: 2-5 phrases selon la complexité (sois CONCIS mais complet)
 - Ton: Professionnel mais pas trop formel, courtois et sympathique
-- Structure: Greeting → Corps du message → Remerciement/Clôture
+- Structure: Greeting → Corps du message → Remerciement → Formule de politesse + [Votre Nom]
 - PAS d'émojis (aucun !)
-- PAS de signature finale type "Cordialement, [Nom]" (sera ajoutée automatiquement)
-- CRITIQUE: NE JAMAIS utiliser de placeholders comme [Votre nom], [Nom], [Prénom], [Signature]
-- CRITIQUE: Le message doit être 100% PRÊT à l'envoi, AUCUNE donnée à remplacer
-- Termine UNIQUEMENT par "Merci." ou "Merci d'avance." ou "Merci beaucoup."
-- PAS de formule de politesse finale type "Cordialement," (sera ajoutée automatiquement)
+- TOUJOURS terminer par "Cordialement," sur une ligne, puis "[Votre Nom]" sur la ligne suivante
 - Garde le contexte et les détails importants
 - Si la demande est urgente, le mentionner poliment
 
@@ -132,7 +128,10 @@ Output: "{greeting}
 
 J'espère que tout se passe bien. Pourrais-tu me faire un point sur l'avancement du projet ?
 
-Merci d'avance."
+Merci d'avance.
+
+Cordialement,
+[Votre Nom]"
 
 Input: "besoin rapport Q4 urgent pour réunion lundi"
 Output: "{greeting}
@@ -141,13 +140,20 @@ J'espère que tu vas bien. Nous aurions besoin du rapport Q4 de manière assez u
 
 Pourrais-tu nous le transmettre dès que possible ?
 
-Merci beaucoup."
+Merci beaucoup.
 
-IMPORTANT: Génère UNIQUEMENT le corps de l'email (greeting + message + merci).
-NE METS PAS "Cordialement," ou toute autre formule de politesse finale.
-NE METS PAS de nom/signature à la fin.
-NE METS PAS de placeholders comme [Votre nom] ou [Nom].
-Tout ce qui vient après "Merci." sera ajouté automatiquement par le système.
+Cordialement,
+[Votre Nom]"
+
+IMPORTANT: Le format EXACT est:
+- Greeting
+- Message (2-5 phrases)
+- Merci. / Merci d'avance. / Merci beaucoup.
+- Ligne vide
+- Cordialement,
+- [Votre Nom]
+
+Le placeholder "[Votre Nom]" sera automatiquement remplacé par le nom réel de l'expéditeur.
 
 Génère maintenant l'email professionnel pour le message ci-dessus:"""
 
@@ -167,16 +173,24 @@ Génère maintenant l'email professionnel pour le message ci-dessus:"""
 			improved = loop.run_until_complete(get_completion())
 			loop.close()
 
-			# Cleanup: Remove any accidental signature/closing/placeholders that LLM might have added
-			closing_phrases = [
-				"cordialement",
-				"bien à vous",
-				"bien à toi",
-				"sincèrement",
-				"meilleures salutations",
-				"à bientôt",
-				"au plaisir",
-			]
+			# Get sender name for signature replacement
+			try:
+				user = frappe.get_doc("User", frappe.session.user)
+				
+				# Priority: full_name > first_name + last_name > first_name > last_name > email
+				if user.full_name and user.full_name.strip():
+					sender_name = user.full_name.strip()
+				elif user.first_name and user.last_name:
+					sender_name = f"{user.first_name.strip()} {user.last_name.strip()}"
+				elif user.first_name:
+					sender_name = user.first_name.strip()
+				elif user.last_name:
+					sender_name = user.last_name.strip()
+				else:
+					sender_name = frappe.session.user
+			except Exception as e:
+				frappe.logger().warning(f"[IMPROVE_EMAIL] Could not get sender name: {e}")
+				sender_name = frappe.session.user
 
 			# Regex patterns for placeholders (case-insensitive)
 			placeholder_patterns = [
@@ -188,31 +202,11 @@ Génère maintenant l'email professionnel pour le message ci-dessus:"""
 				r"\[votre\s+signature\]",
 			]
 
-			# Split by double newlines to find paragraphs
-			paragraphs = improved.split("\n\n")
-			cleaned_paragraphs = []
+			# Replace ALL placeholders with actual sender name
+			for pattern in placeholder_patterns:
+				improved = re.sub(pattern, sender_name, improved, flags=re.IGNORECASE)
 
-			for para in paragraphs:
-				para_lower = para.lower().strip()
-
-				# Skip paragraph if it contains any closing phrase
-				# (even if there's other text like "[Votre Nom]" after)
-				if any(phrase in para_lower for phrase in closing_phrases):
-					frappe.logger().info(f"[IMPROVE_EMAIL] Skipping closing paragraph: {para[:50]}...")
-					continue
-
-				# Remove placeholder patterns from paragraph
-				for pattern in placeholder_patterns:
-					para = re.sub(pattern, '', para, flags=re.IGNORECASE)
-
-				# Skip paragraph if it's empty after cleanup
-				para = para.strip()
-				if para:
-					cleaned_paragraphs.append(para)
-
-			improved = "\n\n".join(cleaned_paragraphs).strip()
-
-			frappe.logger().info("[IMPROVE_EMAIL] Cleanup: removed closings and placeholders")
+			frappe.logger().info(f"[IMPROVE_EMAIL] Replaced placeholders with: {sender_name}")
 
 			frappe.logger().info(f"[IMPROVE_EMAIL] Message improved successfully via LLM")
 
