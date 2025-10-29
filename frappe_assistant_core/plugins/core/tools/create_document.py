@@ -233,7 +233,12 @@ class DocumentCreate(BaseTool):
                     result["message"] = f"{doctype} '{doc.name}' created as draft. Submit failed: {str(e)}"
                     result["submit_error"] = str(e)
             else:
-                result["message"] = f"{doctype} '{doc.name}' created successfully as draft"
+                # Adapt message based on is_submittable
+                if meta.is_submittable:
+                    result["message"] = f"📄 {doctype} '{doc.name}' created as draft"
+                else:
+                    # Non-submittable DocTypes (Todo, Customer, Item, etc.)
+                    result["message"] = f"📄 {doctype} '{doc.name}' created and saved"
 
             # Check if user can submit this document later
             if doc.docstatus == 0:  # Only for draft documents
@@ -246,18 +251,42 @@ class DocumentCreate(BaseTool):
             if hasattr(doc, "workflow_state") and doc.workflow_state:
                 result["workflow_state"] = doc.workflow_state
 
-            # Add useful next steps information
+            # Add useful next steps information (adapt based on is_submittable)
             if doc.docstatus == 0:
-                result["next_steps"] = [
-                    "Document is in draft state",
-                    "You can update this document using document_update tool",
-                    f"Submit permission: {'Available' if result['can_submit'] else 'Not available'}",
-                ]
+                if meta.is_submittable:
+                    result["next_steps"] = [
+                        "Document is in draft state",
+                        "You can update this document using update_document tool",
+                        f"Submit permission: {'Available' if result['can_submit'] else 'Not available'}",
+                    ]
+                else:
+                    # Non-submittable: no mention of draft/submit
+                    result["next_steps"] = [
+                        "Document is saved",
+                        "You can update this document using update_document tool",
+                    ]
             else:
                 result["next_steps"] = [
                     "Document is submitted and cannot be modified",
-                    "Use document_get to view the submitted document",
+                    "Use get_document to view the submitted document",
                 ]
+
+            # CRITICAL: Add pending_document for conversation context (same pattern as email)
+            # Extract a description/title for context
+            doc_description = None
+            for field in ["description", "subject", "title", "item_name", "customer_name", "supplier_name"]:
+                if hasattr(doc, field) and getattr(doc, field):
+                    doc_description = getattr(doc, field)
+                    break
+
+            result["pending_document"] = {
+                "doctype": doctype,
+                "name": doc.name,
+                "action": "created",
+                "is_submittable": meta.is_submittable,
+                "docstatus": doc.docstatus,
+                "description": doc_description or doc.name
+            }
 
             # Log successful creation
             return result
