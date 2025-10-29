@@ -20,6 +20,7 @@ Uses LLM to transform casual messages into professional business emails.
 """
 
 from typing import Any, Dict
+import re  # For regex placeholder removal
 
 import frappe
 from frappe import _
@@ -117,6 +118,10 @@ RÈGLES STRICTES:
 - Structure: Greeting → Corps du message → Remerciement/Clôture
 - PAS d'émojis (aucun !)
 - PAS de signature finale type "Cordialement, [Nom]" (sera ajoutée automatiquement)
+- CRITIQUE: NE JAMAIS utiliser de placeholders comme [Votre nom], [Nom], [Prénom], [Signature]
+- CRITIQUE: Le message doit être 100% PRÊT à l'envoi, AUCUNE donnée à remplacer
+- Termine UNIQUEMENT par "Merci." ou "Merci d'avance." ou "Merci beaucoup."
+- PAS de formule de politesse finale type "Cordialement," (sera ajoutée automatiquement)
 - Garde le contexte et les détails importants
 - Si la demande est urgente, le mentionner poliment
 
@@ -138,6 +143,12 @@ Pourrais-tu nous le transmettre dès que possible ?
 
 Merci beaucoup."
 
+IMPORTANT: Génère UNIQUEMENT le corps de l'email (greeting + message + merci).
+NE METS PAS "Cordialement," ou toute autre formule de politesse finale.
+NE METS PAS de nom/signature à la fin.
+NE METS PAS de placeholders comme [Votre nom] ou [Nom].
+Tout ce qui vient après "Merci." sera ajouté automatiquement par le système.
+
 Génère maintenant l'email professionnel pour le message ci-dessus:"""
 
 			# Call LLM asynchronously
@@ -156,7 +167,7 @@ Génère maintenant l'email professionnel pour le message ci-dessus:"""
 			improved = loop.run_until_complete(get_completion())
 			loop.close()
 
-			# Cleanup: Remove any accidental signature/closing that LLM might have added
+			# Cleanup: Remove any accidental signature/closing/placeholders that LLM might have added
 			closing_phrases = [
 				"cordialement",
 				"bien à vous",
@@ -167,20 +178,41 @@ Génère maintenant l'email professionnel pour le message ci-dessus:"""
 				"au plaisir",
 			]
 
+			# Regex patterns for placeholders (case-insensitive)
+			placeholder_patterns = [
+				r"\[votre\s+nom\]",
+				r"\[nom\]",
+				r"\[prénom\]",
+				r"\[votre\s+prénom\]",
+				r"\[signature\]",
+				r"\[votre\s+signature\]",
+			]
+
 			# Split by double newlines to find paragraphs
 			paragraphs = improved.split("\n\n")
 			cleaned_paragraphs = []
 
 			for para in paragraphs:
 				para_lower = para.lower().strip()
+
 				# Skip paragraph if it's just a closing
 				if any(phrase in para_lower for phrase in closing_phrases):
 					# Check if it's ONLY the closing (not part of a sentence)
 					if len(para_lower.split()) <= 3:  # Max 3 words = likely just closing
 						continue
-				cleaned_paragraphs.append(para)
+
+				# Remove placeholder patterns from paragraph
+				for pattern in placeholder_patterns:
+					para = re.sub(pattern, '', para, flags=re.IGNORECASE)
+
+				# Skip paragraph if it's empty after cleanup
+				para = para.strip()
+				if para:
+					cleaned_paragraphs.append(para)
 
 			improved = "\n\n".join(cleaned_paragraphs).strip()
+
+			frappe.logger().info("[IMPROVE_EMAIL] Cleanup: removed closings and placeholders")
 
 			frappe.logger().info(f"[IMPROVE_EMAIL] Message improved successfully via LLM")
 
