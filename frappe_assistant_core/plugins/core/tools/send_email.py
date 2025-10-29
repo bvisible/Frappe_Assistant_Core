@@ -238,7 +238,7 @@ Exemple 4 - Avec CC/BCC:
 
 			# Step 4: Get sender info
 			sender_email = frappe.session.user
-			sender_name = frappe.db.get_value("User", sender_email, "full_name") or sender_email
+			sender_name = self._get_sender_name(sender_email)
 
 			# Step 5: Create Communication draft
 			comm = frappe.new_doc("Communication")
@@ -589,7 +589,7 @@ Exemple 4 - Avec CC/BCC:
 				improved = f"{improved}\n\nCordialement,"
 
 		# Add sender signature
-		sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or "NORA Assistant"
+		sender_name = self._get_sender_name(frappe.session.user)
 		if sender_name not in improved:
 			improved = f"{improved}\n{sender_name}"
 
@@ -683,6 +683,47 @@ Exemple 4 - Avec CC/BCC:
 				"success": False,
 				"error": str(e)
 			}
+
+	def _get_sender_name(self, user_email: str) -> str:
+		"""
+		Get sender name with smart fallback logic.
+
+		Priority:
+		1. full_name (if not empty)
+		2. first_name + last_name (if both exist)
+		3. first_name only (if exists)
+		4. last_name only (if exists)
+		5. email address (last resort)
+
+		Args:
+			user_email: User email address
+
+		Returns:
+			str: Best available name for signature
+		"""
+		user = frappe.get_doc("User", user_email)
+
+		# Priority 1: full_name
+		if user.full_name and user.full_name.strip():
+			return user.full_name.strip()
+
+		# Priority 2: first_name + last_name
+		first = (user.first_name or "").strip()
+		last = (user.last_name or "").strip()
+
+		if first and last:
+			return f"{first} {last}"
+
+		# Priority 3: first_name only
+		if first:
+			return first
+
+		# Priority 4: last_name only
+		if last:
+			return last
+
+		# Priority 5: email (last resort)
+		return user_email
 
 
 # Make sure class name matches file name for discovery
