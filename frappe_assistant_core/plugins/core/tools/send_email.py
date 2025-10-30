@@ -128,7 +128,31 @@ Exemple 4 - Avec CC/BCC:
   2. Le système gère automatiquement les ambiguïtés et les typos
   3. Si incertain sur le destinataire, le tool demandera clarification
   4. Pour lister les utilisateurs disponibles: get_list('User', filters={'enabled': 1})
-  5. Pour chercher une personne spécifique d'abord: search_link('User', 'jeremy')"""
+  5. Pour chercher une personne spécifique d'abord: search_link('User', 'jeremy')
+
+📝 FORMAT EMAIL PROFESSIONNEL (IMPORTANT):
+  Quand tu génères un email, utilise TOUJOURS ce format professionnel:
+
+  • Greeting: "Bonjour [prénom destinataire],"
+  • Corps: 2-5 phrases professionnelles, courtoises et claires
+  • Remerciement: "Merci d'avance." ou "Merci."
+  • Signature: "Cordialement,\n[TON NOM COMPLET depuis le contexte système]"
+
+  ⚠️ CRITIQUE - Signature:
+  • Utilise TOUJOURS ton nom complet (full_name) depuis le contexte système fourni
+  • NE JAMAIS utiliser "Votre équipe", "L'équipe Neoffice", ou placeholders génériques
+  • Exemple: Si ton nom est "Administrator", signe avec "Cordialement,\nAdministrator"
+  • PAS d'émojis dans les emails
+
+  Exemple complet:
+    Bonjour Jérémy,
+
+    Pourrais-tu me faire un point sur l'avancement du projet ?
+
+    Merci d'avance.
+
+    Cordialement,
+    Administrator"""
 		self.requires_permission = "Email"
 
 		self.inputSchema = {
@@ -151,11 +175,6 @@ Exemple 4 - Avec CC/BCC:
 					"default": False,
 					"description": "If true, sends email immediately. If false (recommended), creates draft and returns preview for user confirmation. Use confirm_send_email tool to send after user approves."
 				},
-				"improve_message": {
-					"type": "boolean",
-					"default": True,
-					"description": "If true, improves message with proper greetings, formatting, and professional signature. If false, uses message as-is."
-				},
 				"cc": {
 					"type": "string",
 					"description": "Optional CC recipients (comma-separated emails or names)."
@@ -174,7 +193,6 @@ Exemple 4 - Avec CC/BCC:
 		subject = arguments.get("subject")
 		message = arguments.get("message")
 		send_now = arguments.get("send_now", False)
-		improve_message = arguments.get("improve_message", True)
 		cc = arguments.get("cc")
 		bcc = arguments.get("bcc")
 
@@ -232,51 +250,9 @@ Exemple 4 - Avec CC/BCC:
 			sender_email = frappe.session.user
 			sender_name = self._get_sender_name(sender_email)
 
-			# Step 4: Improve message if requested
-			if improve_message:
-				# Use MCP improve_email tool for LLM-based improvement
-				try:
-					from frappe_assistant_core.core.tool_registry import get_tool_registry
-
-					registry = get_tool_registry()
-
-					# Extract recipient first name if available
-					recipient_name = ""
-					if recipient:
-						try:
-							recipient_name = (
-								frappe.db.get_value("User", recipient, "first_name") or ""
-							)
-						except Exception:
-							pass
-
-					# Call improve_email_message tool via MCP
-					result = registry.execute_tool(
-						tool_name="improve_email_message",
-						arguments={"message": message, "recipient_name": recipient_name},
-					)
-
-					if result.get("success"):
-						improved_message = result["improved_message"]
-						frappe.logger().info(
-							f"[SEND_EMAIL] Message improved via MCP ({result.get('method', 'unknown')})"
-						)
-					else:
-						# Simple fallback: basic greeting + message + closing
-						improved_message = self._simple_fallback_improvement(message, recipient, sender_name)
-
-				except Exception as e:
-					frappe.logger().error(
-						f"[SEND_EMAIL] MCP improvement error: {str(e)}"
-					)
-					# Simple fallback: basic greeting + message + closing
-					improved_message = self._simple_fallback_improvement(message, recipient, sender_name)
-
-				# Generate subject from improved message
-				improved_subject = subject or self._generate_simple_subject(improved_message)
-			else:
-				improved_message = message
-				improved_subject = subject or "Message from NORA Assistant"
+			# Step 4: Use message as-is (LLM already formatted it with proper structure)
+			improved_message = message
+			improved_subject = subject or self._generate_simple_subject(message)
 
 			# Step 5: Create Communication draft
 			comm = frappe.new_doc("Communication")

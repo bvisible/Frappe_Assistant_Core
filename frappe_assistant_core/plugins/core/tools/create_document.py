@@ -76,6 +76,32 @@ class DocumentCreate(BaseTool):
         submit = arguments.get("submit", False)
         validate_only = arguments.get("validate_only", False)
 
+        # Normalize common LLM mistakes in DocType names
+        DOCTYPE_NORMALIZATION = {
+            "customer object": "Customer",
+            "customer record": "Customer",
+            "supplier object": "Supplier",
+            "supplier record": "Supplier",
+            "item object": "Item",
+            "product": "Item",
+            "invoice": "Sales Invoice",
+            "quote": "Quotation",
+            "order": "Sales Order",
+            "employee record": "Employee",
+            "user object": "User",
+            "contact record": "Contact",
+        }
+
+        if doctype:
+            doctype_lower = doctype.lower()
+            if doctype_lower in DOCTYPE_NORMALIZATION:
+                normalized = DOCTYPE_NORMALIZATION[doctype_lower]
+                frappe.logger().warning(
+                    f"[CREATE_DOCUMENT] Normalized DocType: '{doctype}' → '{normalized}'. "
+                    f"LLM should use exact names from instructions."
+                )
+                doctype = normalized
+
         # Import security validation
         from frappe_assistant_core.core.security_config import (
             filter_sensitive_fields,
