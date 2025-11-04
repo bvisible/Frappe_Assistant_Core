@@ -160,7 +160,7 @@ Exemple 4 - Avec CC/BCC:
 			"properties": {
 				"recipient": {
 					"type": "string",
-					"description": "Recipient name (e.g., 'Jeremy', 'John Doe') or email address. Tool will search Users and Contacts to find the email."
+					"description": "Recipient name (e.g., 'Jeremy', 'John Doe') or email address. Tool will search Users and Contacts to find the email. Can be omitted if auto_find_recipient=true and attach_document is provided."
 				},
 				"subject": {
 					"type": "string",
@@ -182,9 +182,40 @@ Exemple 4 - Avec CC/BCC:
 				"bcc": {
 					"type": "string",
 					"description": "Optional BCC recipients (comma-separated emails or names)."
+				},
+				"attach_document": {
+					"type": "object",
+					"description": "Attach a document as PDF (e.g., Sales Invoice, Quotation). The document will be rendered using its print format and attached to the email.",
+					"properties": {
+						"doctype": {
+							"type": "string",
+							"description": "Document type name (e.g., 'Sales Invoice', 'Quotation', 'Purchase Order')"
+						},
+						"name": {
+							"type": "string",
+							"description": "Document name/ID. Can be partial - will search for matching documents."
+						},
+						"print_format": {
+							"type": "string",
+							"description": "Optional: Print format name to use. If not specified, uses default print format for the doctype."
+						}
+					},
+					"required": ["doctype", "name"]
+				},
+				"attachments": {
+					"type": "array",
+					"description": "Optional: List of File DocType names to attach to the email (for existing files in the system).",
+					"items": {
+						"type": "string"
+					}
+				},
+				"auto_find_recipient": {
+					"type": "boolean",
+					"default": False,
+					"description": "If true and attach_document is provided, automatically find recipient email from the document (e.g., customer email from Sales Invoice). Useful when sending invoices/quotes to customers."
 				}
 			},
-			"required": ["recipient", "message"]
+			"required": ["message"]
 		}
 
 	def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -195,8 +226,48 @@ Exemple 4 - Avec CC/BCC:
 		send_now = arguments.get("send_now", False)
 		cc = arguments.get("cc")
 		bcc = arguments.get("bcc")
+		attach_document = arguments.get("attach_document")
+		attachments = arguments.get("attachments", [])
+		auto_find_recipient = arguments.get("auto_find_recipient", False)
 
 		try:
+			# Step 0: Handle document attachment and auto-recipient resolution
+			attachments_to_send = []
+			document_info = None
+
+			if attach_document:
+				# Find and attach document as PDF
+				doc_result = self._find_and_attach_document(
+					doctype=attach_document.get("doctype"),
+					doc_name=attach_document.get("name"),
+					print_format=attach_document.get("print_format")
+				)
+
+				if not doc_result["success"]:
+					return doc_result  # Return error if document not found or PDF generation failed
+
+				attachments_to_send.append(doc_result["pdf_attachment"])
+				document_info = doc_result["document_info"]
+
+				# Auto-find recipient from document if requested
+				if auto_find_recipient and not recipient:
+					recipient_result = self._get_recipient_from_document(
+						doctype=attach_document.get("doctype"),
+						doc_name=document_info["name"]
+					)
+
+					if not recipient_result["success"]:
+						return recipient_result  # Return error if recipient not found
+
+					recipient = recipient_result["email"]
+					frappe.logger("send_email").info(
+						f"✅ Auto-found recipient from document: {recipient}"
+					)
+
+			# Add existing file attachments
+			if attachments:
+				attachments_to_send.extend(attachments)
+
 			# Step 1: Enhanced recipient resolution
 			recipient_result = self._find_recipient(recipient)
 
@@ -274,6 +345,21 @@ Exemple 4 - Avec CC/BCC:
 			comm.status = "Open"
 
 			comm.insert()
+
+			# Step 5.5: Attach files to Communication if any
+			if attachments_to_send:
+				frappe.logger("send_email").info(
+					f"📎 Attaching {len(attachments_to_send)} file(s) to Communication {comm.name}"
+				)
+				try:
+					from frappe.core.doctype.communication.email import add_attachments
+					add_attachments(comm.name, attachments_to_send)
+					comm.has_attachment = 1
+					comm.save()
+					frappe.db.commit()
+				except Exception as e:
+					frappe.logger("send_email").error(f"Failed to attach files: {str(e)}")
+					# Continue anyway - email can still be sent without attachment
 
 			# Step 6: Generate preview
 			preview_markdown = self._generate_preview(
@@ -618,6 +704,25 @@ Exemple 4 - Avec CC/BCC:
 		try:
 			comm = frappe.get_doc("Communication", communication_id)
 
+			# Get attachments from Communication if any
+			attachments_list = []
+			if comm.has_attachment:
+				frappe.logger("send_email").info(
+					f"📎 Loading attachments for Communication {comm.name}"
+				)
+				attached_files = frappe.get_all(
+					"File",
+					filters={
+						"attached_to_doctype": "Communication",
+						"attached_to_name": comm.name
+					},
+					fields=["name", "file_name"]
+				)
+				attachments_list = [f.name for f in attached_files]
+				frappe.logger("send_email").info(
+					f"📎 Found {len(attachments_list)} attachment(s): {[f.file_name for f in attached_files]}"
+				)
+
 			# Send via frappe.sendmail
 			frappe.sendmail(
 				recipients=comm.recipients,
@@ -625,6 +730,7 @@ Exemple 4 - Avec CC/BCC:
 				bcc=comm.bcc,
 				subject=comm.subject,
 				message=comm.content,
+				attachments=attachments_list if attachments_list else None,
 				reference_doctype="Communication",
 				reference_name=comm.name,
 				now=True
@@ -641,6 +747,259 @@ Exemple 4 - Avec CC/BCC:
 			return {
 				"success": False,
 				"error": str(e)
+			}
+
+	def _find_and_attach_document(self, doctype: str, doc_name: str, print_format: str = None) -> Dict[str, Any]:
+		"""
+		Find document by partial name and generate PDF attachment.
+
+		Args:
+			doctype: Document type (e.g., 'Sales Invoice')
+			doc_name: Full or partial document name (e.g., '143' or 'SINV-2024-00143')
+			print_format: Optional print format name
+
+		Returns:
+			dict: {
+				"success": bool,
+				"pdf_attachment": dict with fname and fcontent,
+				"document_info": dict with name and other details,
+				"error": str (if failed)
+			}
+		"""
+		try:
+			# Check if DocType exists and user has permission
+			if not frappe.db.exists("DocType", doctype):
+				return {
+					"success": False,
+					"error": f"DocType '{doctype}' does not exist. Please check the document type name."
+				}
+
+			if not frappe.has_permission(doctype, "read"):
+				return {
+					"success": False,
+					"error": f"You do not have permission to read {doctype} documents."
+				}
+
+			# Try exact match first
+			if frappe.db.exists(doctype, doc_name):
+				found_doc_name = doc_name
+				frappe.logger("send_email").info(f"✅ Exact match found: {found_doc_name}")
+			else:
+				# Search for partial match
+				frappe.logger("send_email").info(f"🔍 Searching for documents matching: {doc_name}")
+				matching_docs = frappe.get_all(
+					doctype,
+					filters=[["name", "like", f"%{doc_name}%"]],
+					fields=["name"],
+					limit=10
+				)
+
+				if not matching_docs:
+					return {
+						"success": False,
+						"error": f"No {doctype} found matching '{doc_name}'. Please provide the exact document ID or use search_link tool to find it first."
+					}
+
+				if len(matching_docs) > 1:
+					# Multiple matches found - ask user to clarify
+					matches_list = "\n".join([f"  • {doc.name}" for doc in matching_docs])
+					return {
+						"success": False,
+						"error": f"Multiple {doctype} documents found matching '{doc_name}'",
+						"matches": [doc.name for doc in matching_docs],
+						"message": f"🤔 Found {len(matching_docs)} {doctype} matching '{doc_name}':\n\n{matches_list}\n\n💡 Please specify the exact document ID."
+					}
+
+				found_doc_name = matching_docs[0].name
+				frappe.logger("send_email").info(f"✅ Found document: {found_doc_name}")
+
+			# Check permission on specific document
+			if not frappe.has_permission(doctype, "read", found_doc_name):
+				return {
+					"success": False,
+					"error": f"You do not have permission to read {doctype} '{found_doc_name}'."
+				}
+
+			# Generate PDF - use fallback method to avoid SSL issues
+			frappe.logger("send_email").info(f"📄 Generating PDF for {doctype} {found_doc_name}")
+
+			# Get document data
+			doc = frappe.get_doc(doctype, found_doc_name)
+
+			# Generate simple HTML (no external resources to avoid SSL issues)
+			from frappe.utils.pdf import get_pdf
+
+			# Create basic HTML for PDF
+			html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<style>
+		body {{ font-family: Arial, sans-serif; margin: 40px; color: #333; }}
+		h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+		table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+		th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+		th {{ background-color: #f8f9fa; font-weight: bold; }}
+		.header {{ margin-bottom: 30px; }}
+		.footer {{ margin-top: 50px; font-size: 12px; color: #666; }}
+	</style>
+</head>
+<body>
+	<div class="header">
+		<h1>{doctype}: {found_doc_name}</h1>
+	</div>
+	<table>
+"""
+
+			# Add document fields dynamically
+			for key, value in doc.as_dict().items():
+				if key not in ['doctype', 'name', 'owner', 'creation', 'modified', 'modified_by', 'docstatus',
+							   'idx', '_user_tags', '_comments', '_assign', '_liked_by']:
+					if value and str(value).strip():
+						html += f"<tr><th>{key}</th><td>{value}</td></tr>\n"
+
+			html += """
+	</table>
+	<div class="footer">
+		Generated automatically
+	</div>
+</body>
+</html>
+"""
+
+			try:
+				pdf_data = get_pdf(html)
+				pdf_attachment = {
+					"fname": f"{doctype.replace(' ', '-')}-{found_doc_name}.pdf",
+					"fcontent": pdf_data
+				}
+				frappe.logger("send_email").info(f"✅ PDF generated successfully ({len(pdf_data)} bytes)")
+			except Exception as e:
+				frappe.logger("send_email").error(f"PDF generation failed: {str(e)}")
+				return {
+					"success": False,
+					"error": f"Failed to generate PDF for {doctype} '{found_doc_name}': {str(e)}"
+				}
+
+			return {
+				"success": True,
+				"pdf_attachment": pdf_attachment,
+				"document_info": {
+					"name": found_doc_name,
+					"doctype": doctype,
+					"doc": doc  # Full document for recipient extraction
+				}
+			}
+
+		except Exception as e:
+			frappe.logger("send_email").error(f"Error generating PDF: {str(e)}")
+			return {
+				"success": False,
+				"error": f"Failed to generate PDF for {doctype} '{doc_name}': {str(e)}"
+			}
+
+	def _get_recipient_from_document(self, doctype: str, doc_name: str) -> Dict[str, Any]:
+		"""
+		Extract recipient email from document (e.g., customer email from Sales Invoice).
+
+		Args:
+			doctype: Document type
+			doc_name: Document name
+
+		Returns:
+			dict: {"success": bool, "email": str, "error": str}
+		"""
+		try:
+			doc = frappe.get_doc(doctype, doc_name)
+
+			# Common email fields by doctype
+			email_field_map = {
+				"Sales Invoice": ["contact_email", "customer_email"],
+				"Quotation": ["contact_email", "customer_email"],
+				"Sales Order": ["contact_email", "customer_email"],
+				"Delivery Note": ["contact_email", "customer_email"],
+				"Purchase Invoice": ["contact_email", "supplier_email"],
+				"Purchase Order": ["contact_email", "supplier_email"],
+				"Purchase Receipt": ["contact_email", "supplier_email"],
+				"Supplier Quotation": ["contact_email", "supplier_email"],
+			}
+
+			# Get potential email fields for this doctype
+			email_fields = email_field_map.get(doctype, ["contact_email", "email_id", "email"])
+
+			# Try each field
+			for field in email_fields:
+				if hasattr(doc, field):
+					email = getattr(doc, field)
+					if email and "@" in email:
+						frappe.logger("send_email").info(
+							f"✅ Found recipient email in {doctype}.{field}: {email}"
+						)
+						return {
+							"success": True,
+							"email": email
+						}
+
+			# If no email found, try to get from linked Customer/Supplier
+			if hasattr(doc, "customer") and doc.customer:
+				customer_email = frappe.db.get_value("Customer", doc.customer, "email_id")
+				if customer_email:
+					return {"success": True, "email": customer_email}
+
+				# Try to get email from linked Contact
+				contacts = frappe.get_all(
+					"Dynamic Link",
+					filters={
+						"link_doctype": "Customer",
+						"link_name": doc.customer,
+						"parenttype": "Contact"
+					},
+					fields=["parent"],
+					limit=1
+				)
+				if contacts:
+					contact_email = frappe.db.get_value("Contact", contacts[0].parent, "email_id")
+					if contact_email:
+						frappe.logger("send_email").info(
+							f"✅ Found recipient email from linked Contact: {contact_email}"
+						)
+						return {"success": True, "email": contact_email}
+
+			if hasattr(doc, "supplier") and doc.supplier:
+				supplier_email = frappe.db.get_value("Supplier", doc.supplier, "email_id")
+				if supplier_email:
+					return {"success": True, "email": supplier_email}
+
+				# Try to get email from linked Contact
+				contacts = frappe.get_all(
+					"Dynamic Link",
+					filters={
+						"link_doctype": "Supplier",
+						"link_name": doc.supplier,
+						"parenttype": "Contact"
+					},
+					fields=["parent"],
+					limit=1
+				)
+				if contacts:
+					contact_email = frappe.db.get_value("Contact", contacts[0].parent, "email_id")
+					if contact_email:
+						frappe.logger("send_email").info(
+							f"✅ Found recipient email from linked Contact: {contact_email}"
+						)
+						return {"success": True, "email": contact_email}
+
+			# No email found
+			return {
+				"success": False,
+				"error": f"Could not find recipient email in {doctype} '{doc_name}'. Please specify recipient manually using the 'recipient' parameter."
+			}
+
+		except Exception as e:
+			return {
+				"success": False,
+				"error": f"Error extracting recipient from {doctype} '{doc_name}': {str(e)}"
 			}
 
 	def _get_sender_name(self, user_email: str) -> str:
