@@ -159,6 +159,26 @@ Anglais: yes, yeah, okay, send, confirm, go ahead, sure"""
 
 				comm.save()
 
+			# Get attachments from Communication if any
+			attachments_list = []
+			if comm.has_attachment:
+				frappe.logger("confirm_send_email").info(
+					f"📎 Loading attachments for Communication {comm.name}"
+				)
+				attached_files = frappe.get_all(
+					"File",
+					filters={
+						"attached_to_doctype": "Communication",
+						"attached_to_name": comm.name
+					},
+					fields=["name", "file_name"]
+				)
+				# Format attachments as dicts with 'fid' key (required by frappe.sendmail)
+				attachments_list = [{"fid": f.name} for f in attached_files]
+				frappe.logger("confirm_send_email").info(
+					f"📎 Found {len(attachments_list)} attachment(s): {[f['file_name'] for f in attached_files]}"
+				)
+
 			# Send the email
 			frappe.sendmail(
 				recipients=comm.recipients,
@@ -166,6 +186,7 @@ Anglais: yes, yeah, okay, send, confirm, go ahead, sure"""
 				bcc=comm.bcc if comm.bcc else None,
 				subject=comm.subject,
 				message=comm.content,
+				attachments=attachments_list if attachments_list else None,
 				reference_doctype="Communication",
 				reference_name=comm.name,
 				now=True

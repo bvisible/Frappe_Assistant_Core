@@ -718,9 +718,10 @@ Exemple 4 - Avec CC/BCC:
 					},
 					fields=["name", "file_name"]
 				)
-				attachments_list = [f.name for f in attached_files]
+				# Format attachments as dicts with 'fid' key (required by frappe.sendmail)
+				attachments_list = [{"fid": f.name} for f in attached_files]
 				frappe.logger("send_email").info(
-					f"📎 Found {len(attachments_list)} attachment(s): {[f.file_name for f in attached_files]}"
+					f"📎 Found {len(attachments_list)} attachment(s): {[f['file_name'] for f in attached_files]}"
 				)
 
 			# Send via frappe.sendmail
