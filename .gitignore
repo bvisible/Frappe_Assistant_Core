@@ -64,6 +64,12 @@ logs/
 debug_*.py
 test_*.py
 
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
 # Build artifacts
 build/
 client_packages/*/build/
