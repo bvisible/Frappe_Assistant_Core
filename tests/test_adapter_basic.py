@@ -276,24 +276,21 @@ class TestBatchOperations:
         assert len(result['created']) == 3
         assert len(result['failed']) == 0
 
-    @patch('frappe_bridge_adapter_v2.httpx')
-    def test_batch_create_with_errors(self, mock_httpx, mock_env_vars):
+    def test_batch_create_with_errors(self, mock_env_vars):
         """Test création batch avec erreurs"""
-        mock_client = MagicMock()
-
-        # Mock: succès, échec, succès
-        responses = [
-            Mock(json=lambda: {'data': {'name': 'CUST-00001'}}, raise_for_status=Mock()),
-            Mock(side_effect=Exception("Erreur création")),
-            Mock(json=lambda: {'data': {'name': 'CUST-00003'}}, raise_for_status=Mock())
-        ]
-
-        mock_client.post.side_effect = responses
-        mock_httpx.Client.return_value = mock_client
-
         adapter = FrappeProxyAdapter()
-        adapter.client = mock_client
-        adapter._use_httpx = True
+
+        # Mock la méthode create_document pour simuler succès/échec
+        original_create = adapter.create_document
+        call_count = [0]
+
+        def mock_create(doctype, data):
+            call_count[0] += 1
+            if call_count[0] == 2:  # 2ème appel échoue
+                raise Exception("Erreur création")
+            return {'name': f'CUST-{call_count[0]:05d}', **data}
+
+        adapter.create_document = mock_create
 
         docs = [
             {'customer_name': 'Customer 1'},
