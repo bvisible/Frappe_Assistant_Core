@@ -84,7 +84,61 @@ ls -la
 find . -name "frappe-bench" -type d
 ```
 
-#### ÉTAPE 2 : Explorer la configuration Nora
+#### ÉTAPE 2 : Installer Frappe_Assistant_Core via bench
+
+**IMPORTANT** : Avant de déployer les fichiers manuellement, installe d'abord l'app Frappe_Assistant_Core via bench.
+
+1. **Se positionner dans le répertoire bench** :
+```bash
+# Via ssh-manager MCP
+cd /home/frappe/frappe-bench  # ou le chemin identifié à l'étape 1
+```
+
+2. **Installer l'app depuis le repo GitHub** :
+```bash
+# Récupérer l'app avec la branche de développement
+bench get-app https://github.com/bvisible/Frappe_Assistant_Core.git \
+  --branch claude/mcp-server-code-execution-mode-016mUfZLLAyeqSxR3GYPnrUZ
+
+# Vérifier que l'app a été téléchargée
+ls -la apps/frappe_assistant_core/
+```
+
+3. **Installer l'app sur le site develop** :
+```bash
+# Installer sur le site (remplace prod.local par le nom réel du site develop)
+bench --site develop.local install-app frappe_assistant_core
+
+# Vérifier l'installation
+bench --site develop.local list-apps
+```
+
+**Résultat attendu** :
+```
+frappe
+frappe_assistant_core
+nora
+...
+```
+
+4. **Redémarrer les services** :
+```bash
+bench restart
+
+# Vérifier que tout fonctionne
+bench status
+```
+
+**Note** : Si le site s'appelle différemment (ex: `prod.local`, `nora.local`), adapte la commande :
+```bash
+# Lister les sites disponibles
+bench --site all list
+
+# Installer sur le bon site
+bench --site <nom_du_site> install-app frappe_assistant_core
+```
+
+#### ÉTAPE 3 : Explorer la configuration Nora
 
 1. Comprends l'architecture de Nora :
    - Quels sont les DocTypes custom de Nora ?
@@ -98,30 +152,36 @@ find . -name "frappe-bench" -type d
 **Fichiers à explorer** :
 ```bash
 # Dans Nora
+cd apps/nora
 cat nora/hooks.py
 cat nora/config.py
 ls -la nora/
 find nora/ -name "*.json" | head -10
+
+# Dans Frappe_Assistant_Core (maintenant installé)
+cd ../frappe_assistant_core
+ls -la
+cat frappe_assistant_core/hooks.py
 ```
 
-#### ÉTAPE 3 : Déployer l'adaptateur V2 et les scripts
+#### ÉTAPE 4 : Déployer les fichiers de test et validation
 
-1. **Créer le répertoire de déploiement** :
+Les fichiers sont maintenant dans `apps/frappe_assistant_core/` grâce à bench get-app.
+
+1. **Accéder au répertoire de l'app** :
 ```bash
-# Sur develop via ssh-manager
-mkdir -p ~/frappe_assistant_integration
-cd ~/frappe_assistant_integration
+cd /home/frappe/frappe-bench/apps/frappe_assistant_core
+ls -la
+
+# Vérifier que tous les fichiers Phase 3 sont présents
+ls -la frappe_bridge_adapter_v2.py
+ls -la validate_integration.py
+ls -la tests/
 ```
 
-2. **Copier les fichiers essentiels** depuis Frappe_Assistant_Core :
-   - `frappe_bridge_adapter_v2.py`
-   - `validate_integration.py`
-   - `tests/` (tout le répertoire)
-   - `.env.example` (créer si nécessaire)
-
-3. **Créer la configuration .env** :
+2. **Créer la configuration .env** :
 ```bash
-# Sur develop
+# Dans le répertoire de l'app
 cat > .env << 'EOF'
 FRAPPE_URL=http://localhost:8000
 FRAPPE_API_KEY=<À_GÉNÉRER>
@@ -129,7 +189,11 @@ FRAPPE_API_SECRET=<À_GÉNÉRER>
 EOF
 ```
 
-#### ÉTAPE 4 : Générer les credentials API
+**Note** : Si certains fichiers de test manquent (car pas dans l'app Frappe officielle), tu peux :
+- Les copier manuellement depuis le repo
+- Ou les créer sur place
+
+#### ÉTAPE 5 : Générer les credentials API
 
 1. Connecte-toi à l'interface Frappe de develop
 2. Génère une API Key + Secret :
@@ -157,11 +221,11 @@ print(f"API Secret: {api_secret}")
 
 3. Met à jour `.env` avec les credentials générés
 
-#### ÉTAPE 5 : Installer les dépendances de test
+#### ÉTAPE 6 : Installer les dépendances de test
 
 ```bash
-# Sur develop via ssh-manager
-cd ~/frappe_assistant_integration
+# Dans le répertoire de l'app
+cd /home/frappe/frappe-bench/apps/frappe_assistant_core
 
 # Installer pytest et dépendances
 pip3 install pytest pytest-cov pytest-mock httpx
@@ -170,7 +234,7 @@ pip3 install pytest pytest-cov pytest-mock httpx
 pip3 install -r tests/requirements-test.txt
 ```
 
-#### ÉTAPE 6 : Exécuter les tests unitaires
+#### ÉTAPE 7 : Exécuter les tests unitaires
 
 ```bash
 # Tests unitaires (sans instance Frappe)
@@ -184,7 +248,7 @@ python3 -m pytest tests/test_adapter_basic.py -v
 - ✅ 0 échec
 - ✅ Durée < 10s
 
-#### ÉTAPE 7 : Exécuter le script de validation d'intégration
+#### ÉTAPE 8 : Exécuter le script de validation d'intégration
 
 ```bash
 # Validation complète avec Nora develop
@@ -207,7 +271,7 @@ python3 validate_integration.py
 - ✅ Connectivité fonctionne
 - ✅ Rapport JSON généré (`validation_report.json`)
 
-#### ÉTAPE 8 : Tests d'intégration approfondis
+#### ÉTAPE 9 : Tests d'intégration approfondis
 
 ```bash
 # Tests d'intégration (avec vraie instance)
@@ -219,7 +283,7 @@ python3 -m pytest tests/test_integration.py -v --integration
 - ✅ Pas d'erreurs de connexion
 - ✅ CRUD complet fonctionne
 
-#### ÉTAPE 9 : Exécuter les benchmarks
+#### ÉTAPE 10 : Exécuter les benchmarks
 
 ```bash
 # Benchmarks de performance
@@ -237,7 +301,7 @@ python3 tests/benchmark_adapter.py
 - Speedup : 10-150x
 - Batch : 2-3x plus rapide qu'individuel
 
-#### ÉTAPE 10 : Tests spécifiques à Nora
+#### ÉTAPE 11 : Tests spécifiques à Nora
 
 1. **Identifier les DocTypes Nora** :
 ```python
@@ -267,7 +331,7 @@ for doctype in nora_doctypes:
    - Identifier comment Nora configure les LLM
    - Tester que l'adaptateur peut lire/écrire ces configs
 
-#### ÉTAPE 11 : Créer un rapport de validation
+#### ÉTAPE 12 : Créer un rapport de validation
 
 Créer un fichier `NORA_VALIDATION_REPORT.md` avec :
 
@@ -318,7 +382,7 @@ OU
 ❌ Des corrections sont nécessaires avant production
 ```
 
-#### ÉTAPE 12 : Tests de charge (optionnel)
+#### ÉTAPE 13 : Tests de charge (optionnel)
 
 Si tout fonctionne bien, teste la performance sous charge :
 
@@ -452,30 +516,43 @@ pip3 install httpx
 # 1. Connexion ssh-manager
 ssh connect develop
 
-# 2. Setup
-mkdir -p ~/frappe_assistant_integration
-cd ~/frappe_assistant_integration
-# [Copier les fichiers depuis Frappe_Assistant_Core]
+# 2. Installer l'app via bench
+cd /home/frappe/frappe-bench
+bench get-app https://github.com/bvisible/Frappe_Assistant_Core.git \
+  --branch claude/mcp-server-code-execution-mode-016mUfZLLAyeqSxR3GYPnrUZ
+bench --site develop.local install-app frappe_assistant_core
+bench restart
 
-# 3. Configuration
-# [Créer .env avec credentials]
+# 3. Explorer Nora
+cd apps/nora
+cat nora/hooks.py
 
-# 4. Tests unitaires
+# 4. Accéder aux fichiers de test
+cd ../frappe_assistant_core
+ls -la frappe_bridge_adapter_v2.py validate_integration.py tests/
+
+# 5. Créer .env avec credentials
+# [Générer API Key/Secret puis créer .env]
+
+# 6. Installer dépendances test
+pip3 install -r tests/requirements-test.txt
+
+# 7. Tests unitaires
 python3 -m pytest tests/test_adapter_basic.py -v
 
-# 5. Validation intégration
+# 8. Validation intégration
 python3 validate_integration.py
 
-# 6. Tests d'intégration
+# 9. Tests d'intégration
 python3 -m pytest tests/test_integration.py -v --integration
 
-# 7. Benchmarks
+# 10. Benchmarks
 python3 tests/benchmark_adapter.py
 
-# 8. Tests Nora custom
-# [Exécuter scripts Python custom]
+# 11. Tests Nora custom
+# [Scripts Python pour DocTypes Nora]
 
-# 9. Rapport
+# 12. Rapport
 # [Créer NORA_VALIDATION_REPORT.md]
 ```
 
@@ -530,14 +607,17 @@ Avant de conclure, assure-toi que :
 
 - [ ] ssh-manager MCP fonctionne
 - [ ] Nora develop est accessible
-- [ ] Fichiers déployés correctement
+- [ ] App installée via `bench get-app` ✅
+- [ ] App installée sur le site via `bench install-app` ✅
+- [ ] Services redémarrés (`bench restart`) ✅
+- [ ] Fichiers de test présents dans apps/frappe_assistant_core/
 - [ ] .env configuré avec credentials valides
 - [ ] Tests unitaires : 18/18 ✅
 - [ ] Validation intégration : ≥90% ✅
 - [ ] Tests d'intégration : ≥13/15 ✅
 - [ ] Benchmarks exécutés
 - [ ] DocTypes Nora testés
-- [ ] Rapport créé
+- [ ] Rapport créé (NORA_VALIDATION_REPORT.md)
 - [ ] Problèmes documentés
 - [ ] Recommandations formulées
 
