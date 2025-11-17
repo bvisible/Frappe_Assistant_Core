@@ -5,6 +5,65 @@ All notable changes to Frappe Assistant Core will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2025-10-28
+
+### ✨ Enhanced - send_email Tool
+
+#### Smart Recipient Resolution
+- **Added** ambiguity detection: Returns list when multiple people match name
+- **Added** fuzzy search: Suggests similar names for typos (60% similarity threshold)
+- **Improved** error messages: Clear guidance with actionable suggestions
+- **Added** diagnostic logging: Track resolution process for debugging
+
+#### How It Works
+- **Single match** (1 person named "Jeremy"): Auto-resolves to email, sends immediately
+- **Multiple matches** (3 people named "Jeremy"): Returns list, asks user to clarify
+- **Typo tolerance** ("Jeremmy"): Fuzzy search suggests "Jeremy (85% match), Jerome (70%)"
+- **Not found** ("Zxyzzy"): Helpful error with search_link suggestion
+
+#### Examples
+```python
+# Before: Ambiguous match → sent to wrong person or failed
+send_email(recipient="Jeremy", message="Réunion demain?")
+
+# After: Detects ambiguity → asks user
+{
+  "success": false,
+  "matches": [
+    {"name": "Jeremy Smith", "email": "jeremy.smith@..."},
+    {"name": "Jérémy Christillin", "email": "jeremy@bvisible.ch"}
+  ],
+  "message": "🤔 J'ai trouvé 2 personnes nommées 'Jeremy'..."
+}
+```
+
+#### Technical Details
+- **Search scope**: User.full_name, User.email, Contact.first_name, Contact.email_id
+- **Fuzzy algorithm**: difflib.SequenceMatcher with 60% similarity threshold
+- **Detection limit**: Increased from 1 to 5 matches for ambiguity awareness
+- **Logging**: Comprehensive debug logs with emoji indicators (🔍 ✉️ ✅ ❌)
+
+#### Improved Tool Description
+- **Enhanced** LLM guidance with detailed examples and workflow explanation
+- **Added** emoji-based visual structure for better comprehension
+- **Documented** all edge cases (ambiguity, typos, not found)
+- **Included** best practices and common pitfalls
+
+### 🔧 Technical Changes
+- **Modified** `_find_recipient()`: +105 lines (ambiguity detection, logging)
+- **Added** `_fuzzy_search_recipients()`: +80 lines (new method)
+- **Modified** `execute()`: +43 lines (enhanced error handling)
+- **Updated** tool description: Complete rewrite with examples
+
+### 🐛 Bug Fixes
+- **Fixed** "recipient not found" when user provides name instead of email
+- **Fixed** silent failure when multiple people match (now asks for clarification)
+
+### 📊 Impact
+- **Backward compatible**: All existing code continues to work
+- **No breaking changes**: Direct email addresses work exactly as before
+- **Enhanced UX**: Better error messages guide users to correct usage
+
 ## [2.2.0] - 2025-10-13
 
 ### 🎯 Major Release - StreamableHTTP Transport Migration

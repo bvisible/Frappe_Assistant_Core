@@ -1,0 +1,1049 @@
+# Frappe Assistant Core - AI Assistant integration for Frappe Framework
+# Copyright (C) 2025 Paul Clinton
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Send Email Tool for Core Plugin.
+Creates email drafts with recipient search, message improvement, and preview.
+"""
+
+from typing import Any, Dict
+import frappe
+from frappe import _
+
+from frappe_assistant_core.core.base_tool import BaseTool
+
+
+class SendEmail(BaseTool):
+	"""
+	Tool for sending emails with smart recipient search and message improvement.
+
+	Workflow:
+	1. Search for recipient (User or Contact)
+	2. Optionally improve message via LLM
+	3. Create Communication draft
+	4. Return preview for user confirmation
+	5. Use confirm_send_email tool to actually send
+	"""
+
+	def __init__(self):
+		super().__init__()
+		self.name = "send_email"
+		self.description = """Prépare et envoie des emails avec résolution intelligente du destinataire.
+
+📧 PARAMÈTRE RECIPIENT (destinataire):
+  • Email complet: "jeremy@example.com" → utilisé directement
+  • Nom uniquement: "Jeremy" ou "John Doe" → recherche automatique dans Users et Contacts
+  • Recherche dans les champs: full_name, first_name, last_name, email
+
+🎯 GESTION AUTOMATIQUE DES CAS SPÉCIAUX:
+  • 1 seul match trouvé → email créé automatiquement avec l'adresse trouvée
+  • Plusieurs matches → retourne liste des correspondances, demande clarification
+  • Aucun match exact → suggestions avec recherche floue (tolérance typos)
+  • Exemple: "Jeremmy" (typo) → suggère "Jeremy (85% match)"
+
+🔄 WORKFLOW COMPLET EN 5 ÉTAPES:
+  1. Résout automatiquement le destinataire (nom → email via recherche)
+  2. Améliore le message si improve_message=true (greeting, formatting, signature)
+  3. Auto-génère le sujet si non fourni (analyse du contenu du message)
+  4. Crée un brouillon Communication dans Frappe
+  5. Retourne aperçu formaté pour confirmation utilisateur
+
+⚠️ IMPORTANT - WORKFLOW DE CONFIRMATION:
+  • send_email avec send_now=false → Crée brouillon et retourne communication_id
+  • ❌ NE JAMAIS rappeler send_email pour confirmer!
+  • ✅ TOUJOURS utiliser confirm_send_email(communication_id) pour envoyer le brouillon
+  • Exemple: send_email(..., send_now=false) retourne {communication_id: "abc123"}
+            → Ensuite: confirm_send_email(communication_id="abc123") pour envoyer
+
+💡 EXEMPLES D'UTILISATION:
+
+Exemple 1 - Nom simple (résolution automatique):
+  send_email(
+    recipient="Jeremy",  # Sera résolu automatiquement en jeremy@bvisible.ch
+    subject="Réunion achats",
+    message="Es-tu dispo demain pour discuter des achats?",
+    send_now=false  # RECOMMANDÉ: crée brouillon, demande confirmation
+  )
+
+Exemple 2 - Email direct (pas de recherche):
+  send_email(
+    recipient="jeremy@example.com",  # Utilisé directement
+    message="Urgent: projet en retard!",
+    send_now=true,  # Envoie immédiatement SANS confirmation (à éviter)
+    improve_message=false  # Garde le message tel quel, sans amélioration
+  )
+
+Exemple 3 - WORKFLOW CORRECT avec confirmation (TOUJOURS faire comme ça!):
+  # Étape 1: Créer le brouillon
+  result = send_email(
+    recipient="Jeremy",
+    subject="Réunion achats",
+    message="Es-tu dispo demain?",
+    send_now=false  # ← IMPORTANT: false pour créer brouillon
+  )
+  # result = {
+  #   "success": true,
+  #   "communication_id": "abc123xyz",
+  #   "preview": "📧 Aperçu...",
+  #   "next_step": "Use confirm_send_email tool..."
+  # }
+
+  # Étape 2: Montrer l'aperçu à l'utilisateur et demander confirmation
+  # (l'agent affiche le preview et demande "Voulez-vous envoyer?")
+
+  # Étape 3: ✅ UTILISER confirm_send_email (PAS send_email à nouveau!)
+  confirm_send_email(communication_id="abc123xyz")  # ← BON
+  # ❌ NE PAS FAIRE: send_email(..., send_now=true)  # ← MAUVAIS!
+
+Exemple 4 - Avec CC/BCC:
+  send_email(
+    recipient="Jeremy",
+    cc="Paul, Marie",  # Supporte noms OU emails séparés par virgule
+    bcc="admin@company.com",
+    message="Compte-rendu réunion...",
+    send_now=false
+  )
+
+⚠️ GESTION DES AMBIGUÏTÉS:
+  • Si 3 personnes nommées "Jeremy" trouvées:
+    → Tool retourne: {"success": false, "matches": [...liste...]}
+    → LLM demande: "J'ai trouvé 3 Jeremy: ..., lequel voulez-vous?"
+  • L'utilisateur précise alors l'email exact ou le nom complet
+
+⚠️ BONNES PRATIQUES:
+  1. TOUJOURS utiliser send_now=false pour demander confirmation avant envoi
+  2. Le système gère automatiquement les ambiguïtés et les typos
+  3. Si incertain sur le destinataire, le tool demandera clarification
+  4. Pour lister les utilisateurs disponibles: get_list('User', filters={'enabled': 1})
+  5. Pour chercher une personne spécifique d'abord: search_link('User', 'jeremy')
+
+📝 FORMAT EMAIL PROFESSIONNEL (IMPORTANT):
+  Quand tu génères un email, utilise TOUJOURS ce format professionnel:
+
+  • Greeting: "Bonjour [prénom destinataire],"
+  • Corps: 2-5 phrases professionnelles, courtoises et claires
+  • Remerciement: "Merci d'avance." ou "Merci."
+  • Signature: "Cordialement,\n[TON NOM COMPLET depuis le contexte système]"
+
+  ⚠️ CRITIQUE - Signature:
+  • Utilise TOUJOURS ton nom complet (full_name) depuis le contexte système fourni
+  • NE JAMAIS utiliser "Votre équipe", "L'équipe Neoffice", ou placeholders génériques
+  • Exemple: Si ton nom est "Administrator", signe avec "Cordialement,\nAdministrator"
+  • PAS d'émojis dans les emails
+
+  Exemple complet:
+    Bonjour Jérémy,
+
+    Pourrais-tu me faire un point sur l'avancement du projet ?
+
+    Merci d'avance.
+
+    Cordialement,
+    Administrator"""
+		self.requires_permission = "Email"
+
+		self.inputSchema = {
+			"type": "object",
+			"properties": {
+				"recipient": {
+					"type": "string",
+					"description": "Recipient name (e.g., 'Jeremy', 'John Doe') or email address. Tool will search Users and Contacts to find the email. Can be omitted if auto_find_recipient=true and attach_document is provided."
+				},
+				"subject": {
+					"type": "string",
+					"description": "Email subject line. If not provided, will be auto-generated from message content."
+				},
+				"message": {
+					"type": "string",
+					"description": "Email message body. Can be informal - tool will improve formatting and add greetings/signature if improve_message=true."
+				},
+				"send_now": {
+					"type": "boolean",
+					"default": False,
+					"description": "If true, sends email immediately. If false (recommended), creates draft and returns preview for user confirmation. Use confirm_send_email tool to send after user approves."
+				},
+				"cc": {
+					"type": "string",
+					"description": "Optional CC recipients (comma-separated emails or names)."
+				},
+				"bcc": {
+					"type": "string",
+					"description": "Optional BCC recipients (comma-separated emails or names)."
+				},
+				"attach_document": {
+					"type": "object",
+					"description": "Attach a document as PDF (e.g., Sales Invoice, Quotation). The document will be rendered using its print format and attached to the email.",
+					"properties": {
+						"doctype": {
+							"type": "string",
+							"description": "Document type name (e.g., 'Sales Invoice', 'Quotation', 'Purchase Order')"
+						},
+						"name": {
+							"type": "string",
+							"description": "Document name/ID. Can be partial - will search for matching documents."
+						},
+						"print_format": {
+							"type": "string",
+							"description": "Optional: Print format name to use. If not specified, uses default print format for the doctype."
+						}
+					},
+					"required": ["doctype", "name"]
+				},
+				"attachments": {
+					"type": "array",
+					"description": "Optional: List of File DocType names to attach to the email (for existing files in the system).",
+					"items": {
+						"type": "string"
+					}
+				},
+				"auto_find_recipient": {
+					"type": "boolean",
+					"default": False,
+					"description": "If true and attach_document is provided, automatically find recipient email from the document (e.g., customer email from Sales Invoice). Useful when sending invoices/quotes to customers."
+				}
+			},
+			"required": ["message"]
+		}
+
+	def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+		"""Prepare and optionally send an email"""
+		recipient = arguments.get("recipient")
+		subject = arguments.get("subject")
+		message = arguments.get("message")
+		send_now = arguments.get("send_now", False)
+		cc = arguments.get("cc")
+		bcc = arguments.get("bcc")
+		attach_document = arguments.get("attach_document")
+		attachments = arguments.get("attachments", [])
+		auto_find_recipient = arguments.get("auto_find_recipient", False)
+
+		try:
+			# Step 0: Handle document attachment and auto-recipient resolution
+			attachments_to_send = []
+			document_info = None
+
+			if attach_document:
+				# Find and attach document as PDF
+				doc_result = self._find_and_attach_document(
+					doctype=attach_document.get("doctype"),
+					doc_name=attach_document.get("name"),
+					print_format=attach_document.get("print_format")
+				)
+
+				if not doc_result["success"]:
+					return doc_result  # Return error if document not found or PDF generation failed
+
+				attachments_to_send.append(doc_result["pdf_attachment"])
+				document_info = doc_result["document_info"]
+
+				# Auto-find recipient from document if requested
+				if auto_find_recipient and not recipient:
+					recipient_result = self._get_recipient_from_document(
+						doctype=attach_document.get("doctype"),
+						doc_name=document_info["name"]
+					)
+
+					if not recipient_result["success"]:
+						return recipient_result  # Return error if recipient not found
+
+					recipient = recipient_result["email"]
+					frappe.logger("send_email").info(
+						f"✅ Auto-found recipient from document: {recipient}"
+					)
+
+			# Add existing file attachments
+			if attachments:
+				attachments_to_send.extend(attachments)
+
+			# Step 1: Enhanced recipient resolution
+			recipient_result = self._find_recipient(recipient)
+
+			# Case 1: Ambiguous - multiple people match
+			if isinstance(recipient_result, dict) and recipient_result.get("ambiguous"):
+				matches_list = "\n".join([
+					f"  • {m['name']} ({m['email']})"
+					for m in recipient_result["matches"]
+				])
+
+				return {
+					"success": False,
+					"error": f"Multiple people found matching '{recipient}'",
+					"matches": recipient_result["matches"],
+					"message": f"🤔 J'ai trouvé {len(recipient_result['matches'])} personnes nommées '{recipient}':\n\n{matches_list}\n\n💡 Veuillez préciser laquelle vous voulez contacter en utilisant:\n  • Le nom complet exact\n  • Ou l'adresse email directement",
+					"next_step": "Specify exact email or full name to disambiguate"
+				}
+
+			# Case 2: Not found but fuzzy suggestions available
+			if isinstance(recipient_result, dict) and recipient_result.get("not_found"):
+				suggestions_list = "\n".join([
+					f"  • {s['name']} ({s['email']}) - {s['similarity']}% match"
+					for s in recipient_result["suggestions"]
+				])
+
+				return {
+					"success": False,
+					"error": f"No exact match for '{recipient}'",
+					"suggestions": recipient_result["suggestions"],
+					"message": f"❓ Aucune personne trouvée nommée exactement '{recipient}'.\n\n💡 Vouliez-vous dire:\n{suggestions_list}\n\nVous pouvez utiliser un des emails ci-dessus ou chercher la personne avec search_link('User', '{recipient}').",
+					"next_step": "Use suggested email or search_link tool to find correct person"
+				}
+
+			# Case 3: Not found and no suggestions
+			if not recipient_result:
+				return {
+					"success": False,
+					"error": f"Could not find '{recipient}' in Users or Contacts",
+					"message": f"❌ Aucun utilisateur ou contact trouvé pour '{recipient}'.\n\n💡 Suggestions:\n  1. Vérifiez l'orthographe du nom\n  2. Utilisez l'adresse email complète: jeremy@example.com\n  3. Ou cherchez d'abord la personne: search_link('User', '{recipient}')\n  4. Ou listez les utilisateurs: get_list('User', filters={{'enabled': 1}})",
+					"next_step": "Provide email address or use search_link tool first"
+				}
+
+			# Case 4: Success - recipient_result is an email string
+			recipient_email = recipient_result
+
+			# Step 2: Find CC/BCC emails if provided
+			cc_emails = self._parse_recipients(cc) if cc else []
+			bcc_emails = self._parse_recipients(bcc) if bcc else []
+
+			# Step 3: Get sender info (needed for fallback)
+			sender_email = frappe.session.user
+			sender_name = self._get_sender_name(sender_email)
+
+			# Step 4: Use message as-is (LLM already formatted it with proper structure)
+			improved_message = message
+			improved_subject = subject or self._generate_simple_subject(message)
+
+			# Step 5: Create Communication draft
+			comm = frappe.new_doc("Communication")
+			comm.communication_type = "Communication"
+			comm.communication_medium = "Email"
+			comm.sent_or_received = "Sent"
+			comm.subject = improved_subject
+			comm.content = improved_message
+			comm.sender = sender_email
+			comm.sender_full_name = sender_name
+			comm.recipients = recipient_email
+
+			if cc_emails:
+				comm.cc = ", ".join(cc_emails)
+			if bcc_emails:
+				comm.bcc = ", ".join(bcc_emails)
+
+			# Don't set email_status yet - it will be set when actually sent
+			comm.status = "Open"
+
+			comm.insert()
+
+			# Step 5.5: Attach files to Communication if any
+			if attachments_to_send:
+				frappe.logger("send_email").info(
+					f"📎 Attaching {len(attachments_to_send)} file(s) to Communication {comm.name}"
+				)
+				try:
+					from frappe.core.doctype.communication.email import add_attachments
+					add_attachments(comm.name, attachments_to_send)
+					comm.has_attachment = 1
+					comm.save()
+					frappe.db.commit()
+				except Exception as e:
+					frappe.logger("send_email").error(f"Failed to attach files: {str(e)}")
+					# Continue anyway - email can still be sent without attachment
+
+			# Step 6: Generate preview
+			preview_markdown = self._generate_preview(
+				recipient_email,
+				improved_subject,
+				improved_message,
+				cc_emails,
+				bcc_emails,
+				sender_name
+			)
+
+			# Step 7: Send now if requested
+			if send_now:
+				send_result = self._send_communication(comm.name)
+				if send_result["success"]:
+					return {
+						"success": True,
+						"communication_id": comm.name,
+						"recipient": recipient_email,
+						"subject": improved_subject,
+						"sent": True,
+						"message": f"Email sent to {recipient_email}",
+						"preview": preview_markdown
+					}
+				else:
+					return {
+						"success": False,
+						"communication_id": comm.name,
+						"error": f"Draft created but send failed: {send_result.get('error')}",
+						"preview": preview_markdown,
+						"next_step": "Use confirm_send_email tool to retry sending"
+					}
+
+			# Return draft for confirmation
+			return {
+				"success": True,
+				"communication_id": comm.name,
+				"recipient": recipient_email,
+				"subject": improved_subject,
+				"sent": False,
+				"awaiting_confirmation": True,  # NEW: Indicates waiting for user confirmation
+				"confirmation_prompt": "Voulez-vous envoyer cet email? (Répondez 'oui' pour confirmer)",  # NEW: Suggested prompt
+				"next_action": {  # NEW: Structured next action for LLM
+					"tool": "confirm_send_email",
+					"parameters": {"communication_id": comm.name},
+					"user_trigger_words": ["oui", "yes", "ok", "envoie", "send", "confirme", "d'accord", "ouais", "yeah", "okay", "go", "vas-y", "sure", "go ahead"]
+				},
+				"preview": preview_markdown,
+				"message": f"📧 Email draft created (ID: {comm.name}). Awaiting user confirmation to send.",
+				"next_step": f"When user confirms, call: confirm_send_email(communication_id='{comm.name}')",
+				# CRITICAL: pending_email dict for deep_chat.py to save as System message
+				"pending_email": {
+					"communication_id": comm.name,
+					"recipient": recipient_email,
+					"subject": improved_subject
+				}
+			}
+
+		except Exception as e:
+			frappe.log_error(
+				title=_("Send Email Error"),
+				message=f"Error preparing email: {str(e)}"
+			)
+			return {
+				"success": False,
+				"error": str(e),
+				"error_type": "email_preparation_error"
+			}
+
+	def _find_recipient(self, recipient: str):
+		"""
+		Enhanced recipient resolution with ambiguity detection and fuzzy search.
+
+		Returns:
+			str: Email address if single match found
+			dict: Error/ambiguity info if multiple/no matches
+			None: No match and no suggestions
+		"""
+		frappe.logger("send_email").info(f"🔍 Searching for recipient: '{recipient}'")
+
+		# If it looks like an email, validate and return
+		if "@" in recipient:
+			# Basic email validation
+			if "." in recipient.split("@")[1]:
+				frappe.logger("send_email").info(f"✉️ Using email directly: {recipient}")
+				return recipient.strip()
+
+		# Search in Users (increased limit to detect ambiguity)
+		users = frappe.get_all(
+			"User",
+			filters={"enabled": 1},
+			fields=["name", "email", "full_name"],
+			or_filters=[
+				{"full_name": ["like", f"%{recipient}%"]},
+				{"email": ["like", f"%{recipient}%"]},
+				{"name": ["like", f"%{recipient}%"]}
+			],
+			limit=5  # Increased from 1 to detect multiple matches
+		)
+
+		frappe.logger("send_email").info(f"👤 User search: found {len(users)} match(es)")
+
+		# Handle multiple matches - ask user to clarify
+		if len(users) > 1:
+			frappe.logger("send_email").warning(f"⚠️ Ambiguous: {len(users)} users match '{recipient}'")
+			return {
+				"ambiguous": True,
+				"type": "User",
+				"matches": [
+					{"name": u.full_name, "email": u.email or u.name}
+					for u in users
+				]
+			}
+
+		# Single user match found
+		if len(users) == 1:
+			resolved_email = users[0].email or users[0].name
+			frappe.logger("send_email").info(
+				f"✅ Resolved '{recipient}' → '{resolved_email}' ({users[0].full_name})"
+			)
+			return resolved_email
+
+		# Search in Contacts (same pattern)
+		contacts = frappe.get_all(
+			"Contact",
+			fields=["name", "email_id", "first_name", "last_name"],
+			or_filters=[
+				{"first_name": ["like", f"%{recipient}%"]},
+				{"last_name": ["like", f"%{recipient}%"]},
+				{"email_id": ["like", f"%{recipient}%"]},
+				{"name": ["like", f"%{recipient}%"]}
+			],
+			limit=5
+		)
+
+		frappe.logger("send_email").info(f"📇 Contact search: found {len(contacts)} match(es)")
+
+		# Handle multiple contact matches
+		if len(contacts) > 1:
+			frappe.logger("send_email").warning(f"⚠️ Ambiguous: {len(contacts)} contacts match '{recipient}'")
+			return {
+				"ambiguous": True,
+				"type": "Contact",
+				"matches": [
+					{
+						"name": f"{c.first_name or ''} {c.last_name or ''}".strip() or c.name,
+						"email": c.email_id
+					}
+					for c in contacts
+				]
+			}
+
+		# Single contact match found
+		if len(contacts) == 1:
+			resolved_email = contacts[0].email_id
+			contact_name = f"{contacts[0].first_name or ''} {contacts[0].last_name or ''}".strip() or contacts[0].name
+			frappe.logger("send_email").info(
+				f"✅ Resolved '{recipient}' → '{resolved_email}' ({contact_name})"
+			)
+			return resolved_email
+
+		# No exact matches - try fuzzy search
+		frappe.logger("send_email").info(f"🔎 No exact match, trying fuzzy search...")
+		fuzzy_matches = self._fuzzy_search_recipients(recipient)
+
+		if fuzzy_matches:
+			frappe.logger("send_email").info(f"💡 Fuzzy search found {len(fuzzy_matches)} suggestions")
+			return {
+				"not_found": True,
+				"suggestions": fuzzy_matches
+			}
+
+		# Absolutely no matches found
+		frappe.logger("send_email").warning(f"❌ No recipient found for '{recipient}'")
+		return None
+
+	def _fuzzy_search_recipients(self, query: str) -> list:
+		"""
+		Fuzzy search for recipients using difflib for typo tolerance.
+
+		Args:
+			query: Name to search for (e.g., "Jeremmy" with typo)
+
+		Returns:
+			list: Top 3 suggestions with similarity scores
+				[{"name": "Jeremy", "email": "jeremy@...", "similarity": 85}, ...]
+		"""
+		import difflib
+
+		frappe.logger("send_email").info(f"🔎 Fuzzy search starting for: '{query}'")
+
+		# Get all enabled users
+		all_users = frappe.get_all(
+			"User",
+			filters={"enabled": 1},
+			fields=["email", "full_name", "name"]
+		)
+
+		# Calculate similarity scores
+		matches = []
+		query_lower = query.lower()
+
+		for user in all_users:
+			name = user.full_name or user.name or ""
+			if not name:
+				continue
+
+			# Calculate similarity ratio (0.0 to 1.0)
+			similarity = difflib.SequenceMatcher(
+				None,
+				query_lower,
+				name.lower()
+			).ratio()
+
+			# Keep matches above 60% similarity threshold
+			if similarity > 0.6:
+				matches.append({
+					"name": user.full_name or user.name,
+					"email": user.email or user.name,
+					"similarity": round(similarity * 100)  # Convert to percentage
+				})
+
+		# Also search contacts
+		all_contacts = frappe.get_all(
+			"Contact",
+			fields=["email_id", "first_name", "last_name", "name"]
+		)
+
+		for contact in all_contacts:
+			name = f"{contact.first_name or ''} {contact.last_name or ''}".strip() or contact.name
+			if not name:
+				continue
+
+			similarity = difflib.SequenceMatcher(
+				None,
+				query_lower,
+				name.lower()
+			).ratio()
+
+			if similarity > 0.6:
+				matches.append({
+					"name": name,
+					"email": contact.email_id,
+					"similarity": round(similarity * 100)
+				})
+
+		# Sort by similarity (best matches first)
+		matches.sort(key=lambda x: x["similarity"], reverse=True)
+
+		# Return top 3 suggestions
+		top_matches = matches[:3]
+
+		frappe.logger("send_email").info(
+			f"💡 Fuzzy search for '{query}': {len(top_matches)} suggestions (from {len(matches)} total)"
+		)
+
+		return top_matches
+
+	def _parse_recipients(self, recipients_string: str) -> list:
+		"""Parse comma-separated recipients and find their emails"""
+		if not recipients_string:
+			return []
+
+		recipients = [r.strip() for r in recipients_string.split(",")]
+		emails = []
+
+		for recipient in recipients:
+			email = self._find_recipient(recipient)
+			if email:
+				emails.append(email)
+
+		return emails
+
+	def _simple_fallback_improvement(self, message: str, recipient: str, sender_name: str) -> str:
+		"""
+		Simple fallback when LLM-based improvement fails.
+		Just adds basic greeting and closing without complex reformulation.
+		"""
+		# Get recipient first name for greeting
+		recipient_name = ""
+		if recipient:
+			try:
+				recipient_name = frappe.db.get_value("User", recipient, "first_name") or recipient.split("@")[0]
+			except Exception:
+				recipient_name = recipient.split("@")[0]
+
+		# Basic email structure
+		greeting = f"Bonjour {recipient_name}," if recipient_name else "Bonjour,"
+
+		# Build simple email
+		improved = f"{greeting}\n\n{message.strip()}\n\nCordialement,\n{sender_name}"
+
+		frappe.logger().warning("[SEND_EMAIL] Using simple fallback (LLM improvement failed)")
+
+		return improved
+
+	def _generate_simple_subject(self, message: str) -> str:
+		"""
+		Generate simple subject from message.
+		Takes first line or first 50 characters.
+		"""
+		# Take first line of message
+		first_line = message.split("\n")[0].strip()
+
+		# Remove greeting if present
+		for greeting in ["Bonjour", "Hello", "Hi", "Salut"]:
+			if first_line.startswith(greeting):
+				# Try to get next line
+				lines = message.split("\n")
+				if len(lines) > 2:  # greeting, empty line, content
+					first_line = lines[2].strip()
+				break
+
+		# Limit length
+		if len(first_line) > 50:
+			return first_line[:47] + "..."
+
+		return first_line if first_line else "Message de NORA"
+
+	def _generate_preview(self, recipient: str, subject: str, content: str, cc: list, bcc: list, sender: str) -> str:
+		"""Generate markdown preview of email"""
+		preview = f"📧 **Aperçu de l'email**\n\n"
+		preview += f"**De:** {sender}\n"
+		preview += f"**À:** {recipient}\n"
+
+		if cc:
+			preview += f"**CC:** {', '.join(cc)}\n"
+		if bcc:
+			preview += f"**BCC:** {', '.join(bcc)}\n"
+
+		preview += f"**Objet:** {subject}\n\n"
+		preview += f"**Message:**\n\n"
+
+		# Quote the message content
+		for line in content.split("\n"):
+			preview += f"> {line}\n"
+
+		return preview
+
+	def _send_communication(self, communication_id: str) -> Dict[str, Any]:
+		"""Actually send the communication via frappe.sendmail"""
+		try:
+			comm = frappe.get_doc("Communication", communication_id)
+
+			# Get attachments from Communication if any
+			attachments_list = []
+			if comm.has_attachment:
+				frappe.logger("send_email").info(
+					f"📎 Loading attachments for Communication {comm.name}"
+				)
+				attached_files = frappe.get_all(
+					"File",
+					filters={
+						"attached_to_doctype": "Communication",
+						"attached_to_name": comm.name
+					},
+					fields=["name", "file_name"]
+				)
+				# Format attachments as dicts with 'fid' key (required by frappe.sendmail)
+				attachments_list = [{"fid": f.name} for f in attached_files]
+				frappe.logger("send_email").info(
+					f"📎 Found {len(attachments_list)} attachment(s): {[f['file_name'] for f in attached_files]}"
+				)
+
+			# Send via frappe.sendmail
+			frappe.sendmail(
+				recipients=comm.recipients,
+				cc=comm.cc,
+				bcc=comm.bcc,
+				subject=comm.subject,
+				message=comm.content,
+				attachments=attachments_list if attachments_list else None,
+				reference_doctype="Communication",
+				reference_name=comm.name,
+				now=True
+			)
+
+			# Update communication status
+			comm.email_status = "Open"
+			comm.db_update()
+			frappe.db.commit()
+
+			return {"success": True}
+
+		except Exception as e:
+			return {
+				"success": False,
+				"error": str(e)
+			}
+
+	def _find_and_attach_document(self, doctype: str, doc_name: str, print_format: str = None) -> Dict[str, Any]:
+		"""
+		Find document by partial name and generate PDF attachment.
+
+		Args:
+			doctype: Document type (e.g., 'Sales Invoice')
+			doc_name: Full or partial document name (e.g., '143' or 'SINV-2024-00143')
+			print_format: Optional print format name
+
+		Returns:
+			dict: {
+				"success": bool,
+				"pdf_attachment": dict with fname and fcontent,
+				"document_info": dict with name and other details,
+				"error": str (if failed)
+			}
+		"""
+		try:
+			# Check if DocType exists and user has permission
+			if not frappe.db.exists("DocType", doctype):
+				return {
+					"success": False,
+					"error": f"DocType '{doctype}' does not exist. Please check the document type name."
+				}
+
+			if not frappe.has_permission(doctype, "read"):
+				return {
+					"success": False,
+					"error": f"You do not have permission to read {doctype} documents."
+				}
+
+			# Try exact match first
+			if frappe.db.exists(doctype, doc_name):
+				found_doc_name = doc_name
+				frappe.logger("send_email").info(f"✅ Exact match found: {found_doc_name}")
+			else:
+				# Search for partial match
+				frappe.logger("send_email").info(f"🔍 Searching for documents matching: {doc_name}")
+				matching_docs = frappe.get_all(
+					doctype,
+					filters=[["name", "like", f"%{doc_name}%"]],
+					fields=["name"],
+					limit=10
+				)
+
+				if not matching_docs:
+					return {
+						"success": False,
+						"error": f"No {doctype} found matching '{doc_name}'. Please provide the exact document ID or use search_link tool to find it first."
+					}
+
+				if len(matching_docs) > 1:
+					# Multiple matches found - ask user to clarify
+					matches_list = "\n".join([f"  • {doc.name}" for doc in matching_docs])
+					return {
+						"success": False,
+						"error": f"Multiple {doctype} documents found matching '{doc_name}'",
+						"matches": [doc.name for doc in matching_docs],
+						"message": f"🤔 Found {len(matching_docs)} {doctype} matching '{doc_name}':\n\n{matches_list}\n\n💡 Please specify the exact document ID."
+					}
+
+				found_doc_name = matching_docs[0].name
+				frappe.logger("send_email").info(f"✅ Found document: {found_doc_name}")
+
+			# Check permission on specific document
+			if not frappe.has_permission(doctype, "read", found_doc_name):
+				return {
+					"success": False,
+					"error": f"You do not have permission to read {doctype} '{found_doc_name}'."
+				}
+
+			# Generate PDF - use fallback method to avoid SSL issues
+			frappe.logger("send_email").info(f"📄 Generating PDF for {doctype} {found_doc_name}")
+
+			# Get document data
+			doc = frappe.get_doc(doctype, found_doc_name)
+
+			# Generate simple HTML (no external resources to avoid SSL issues)
+			from frappe.utils.pdf import get_pdf
+
+			# Create basic HTML for PDF
+			html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<style>
+		body {{ font-family: Arial, sans-serif; margin: 40px; color: #333; }}
+		h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+		table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+		th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+		th {{ background-color: #f8f9fa; font-weight: bold; }}
+		.header {{ margin-bottom: 30px; }}
+		.footer {{ margin-top: 50px; font-size: 12px; color: #666; }}
+	</style>
+</head>
+<body>
+	<div class="header">
+		<h1>{doctype}: {found_doc_name}</h1>
+	</div>
+	<table>
+"""
+
+			# Add document fields dynamically
+			for key, value in doc.as_dict().items():
+				if key not in ['doctype', 'name', 'owner', 'creation', 'modified', 'modified_by', 'docstatus',
+							   'idx', '_user_tags', '_comments', '_assign', '_liked_by']:
+					if value and str(value).strip():
+						html += f"<tr><th>{key}</th><td>{value}</td></tr>\n"
+
+			html += """
+	</table>
+	<div class="footer">
+		Generated automatically
+	</div>
+</body>
+</html>
+"""
+
+			try:
+				pdf_data = get_pdf(html)
+				pdf_attachment = {
+					"fname": f"{doctype.replace(' ', '-')}-{found_doc_name}.pdf",
+					"fcontent": pdf_data
+				}
+				frappe.logger("send_email").info(f"✅ PDF generated successfully ({len(pdf_data)} bytes)")
+			except Exception as e:
+				frappe.logger("send_email").error(f"PDF generation failed: {str(e)}")
+				return {
+					"success": False,
+					"error": f"Failed to generate PDF for {doctype} '{found_doc_name}': {str(e)}"
+				}
+
+			return {
+				"success": True,
+				"pdf_attachment": pdf_attachment,
+				"document_info": {
+					"name": found_doc_name,
+					"doctype": doctype,
+					"doc": doc  # Full document for recipient extraction
+				}
+			}
+
+		except Exception as e:
+			frappe.logger("send_email").error(f"Error generating PDF: {str(e)}")
+			return {
+				"success": False,
+				"error": f"Failed to generate PDF for {doctype} '{doc_name}': {str(e)}"
+			}
+
+	def _get_recipient_from_document(self, doctype: str, doc_name: str) -> Dict[str, Any]:
+		"""
+		Extract recipient email from document (e.g., customer email from Sales Invoice).
+
+		Args:
+			doctype: Document type
+			doc_name: Document name
+
+		Returns:
+			dict: {"success": bool, "email": str, "error": str}
+		"""
+		try:
+			doc = frappe.get_doc(doctype, doc_name)
+
+			# Common email fields by doctype
+			email_field_map = {
+				"Sales Invoice": ["contact_email", "customer_email"],
+				"Quotation": ["contact_email", "customer_email"],
+				"Sales Order": ["contact_email", "customer_email"],
+				"Delivery Note": ["contact_email", "customer_email"],
+				"Purchase Invoice": ["contact_email", "supplier_email"],
+				"Purchase Order": ["contact_email", "supplier_email"],
+				"Purchase Receipt": ["contact_email", "supplier_email"],
+				"Supplier Quotation": ["contact_email", "supplier_email"],
+			}
+
+			# Get potential email fields for this doctype
+			email_fields = email_field_map.get(doctype, ["contact_email", "email_id", "email"])
+
+			# Try each field
+			for field in email_fields:
+				if hasattr(doc, field):
+					email = getattr(doc, field)
+					if email and "@" in email:
+						frappe.logger("send_email").info(
+							f"✅ Found recipient email in {doctype}.{field}: {email}"
+						)
+						return {
+							"success": True,
+							"email": email
+						}
+
+			# If no email found, try to get from linked Customer/Supplier
+			if hasattr(doc, "customer") and doc.customer:
+				customer_email = frappe.db.get_value("Customer", doc.customer, "email_id")
+				if customer_email:
+					return {"success": True, "email": customer_email}
+
+				# Try to get email from linked Contact
+				contacts = frappe.get_all(
+					"Dynamic Link",
+					filters={
+						"link_doctype": "Customer",
+						"link_name": doc.customer,
+						"parenttype": "Contact"
+					},
+					fields=["parent"],
+					limit=1
+				)
+				if contacts:
+					contact_email = frappe.db.get_value("Contact", contacts[0].parent, "email_id")
+					if contact_email:
+						frappe.logger("send_email").info(
+							f"✅ Found recipient email from linked Contact: {contact_email}"
+						)
+						return {"success": True, "email": contact_email}
+
+			if hasattr(doc, "supplier") and doc.supplier:
+				supplier_email = frappe.db.get_value("Supplier", doc.supplier, "email_id")
+				if supplier_email:
+					return {"success": True, "email": supplier_email}
+
+				# Try to get email from linked Contact
+				contacts = frappe.get_all(
+					"Dynamic Link",
+					filters={
+						"link_doctype": "Supplier",
+						"link_name": doc.supplier,
+						"parenttype": "Contact"
+					},
+					fields=["parent"],
+					limit=1
+				)
+				if contacts:
+					contact_email = frappe.db.get_value("Contact", contacts[0].parent, "email_id")
+					if contact_email:
+						frappe.logger("send_email").info(
+							f"✅ Found recipient email from linked Contact: {contact_email}"
+						)
+						return {"success": True, "email": contact_email}
+
+			# No email found
+			return {
+				"success": False,
+				"error": f"Could not find recipient email in {doctype} '{doc_name}'. Please specify recipient manually using the 'recipient' parameter."
+			}
+
+		except Exception as e:
+			return {
+				"success": False,
+				"error": f"Error extracting recipient from {doctype} '{doc_name}': {str(e)}"
+			}
+
+	def _get_sender_name(self, user_email: str) -> str:
+		"""
+		Get sender name with smart fallback logic.
+
+		Priority:
+		1. full_name (if not empty)
+		2. first_name + last_name (if both exist)
+		3. first_name only (if exists)
+		4. last_name only (if exists)
+		5. email address (last resort)
+
+		Args:
+			user_email: User email address
+
+		Returns:
+			str: Best available name for signature
+		"""
+		user = frappe.get_doc("User", user_email)
+
+		# Priority 1: full_name
+		if user.full_name and user.full_name.strip():
+			return user.full_name.strip()
+
+		# Priority 2: first_name + last_name
+		first = (user.first_name or "").strip()
+		last = (user.last_name or "").strip()
+
+		if first and last:
+			return f"{first} {last}"
+
+		# Priority 3: first_name only
+		if first:
+			return first
+
+		# Priority 4: last_name only
+		if last:
+			return last
+
+		# Priority 5: email (last resort)
+		return user_email
+
+
+# Make sure class name matches file name for discovery
+send_email = SendEmail

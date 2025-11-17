@@ -53,20 +53,15 @@ class BaseAssistantTest(unittest.TestCase):
 
     def execute_tool_and_get_result(self, registry, tool_name, arguments):
         """
-        Execute a tool via registry and return unwrapped result.
+        Execute a tool via registry and return the result.
 
-        The registry wraps tool results in a 'result' key, this helper
-        extracts the actual tool result for easier testing.
+        Tools return their data directly with 'success' and other keys.
+        The registry passes through the tool result as-is.
         """
         registry_result = registry.execute_tool(tool_name, arguments)
 
-        # Registry execution should always succeed (unless tool not found)
-        self.assertTrue(
-            registry_result.get("success"), f"Registry execution failed: {registry_result.get('error')}"
-        )
-
-        # Return the actual tool result
-        return registry_result.get("result", {})
+        # Return the tool result directly (it includes 'success' and other data keys)
+        return registry_result
 
     def execute_tool_expect_failure(self, registry, tool_name, arguments, expected_error_text=None):
         """
@@ -75,22 +70,16 @@ class BaseAssistantTest(unittest.TestCase):
         """
         registry_result = registry.execute_tool(tool_name, arguments)
 
-        # Registry execution should succeed even if tool fails
-        self.assertTrue(
-            registry_result.get("success"), f"Registry execution failed: {registry_result.get('error')}"
-        )
-
-        # Get tool result and verify it failed
-        tool_result = registry_result.get("result", {})
+        # Verify the tool failed
         self.assertFalse(
-            tool_result.get("success"), f"Tool execution should have failed but succeeded: {tool_result}"
+            registry_result.get("success"), f"Tool execution should have failed but succeeded: {registry_result}"
         )
 
         # Check error message if provided
         if expected_error_text:
-            self.assertIn(expected_error_text, tool_result.get("error", ""))
+            self.assertIn(expected_error_text, registry_result.get("error", ""))
 
-        return tool_result
+        return registry_result
 
     def tearDown(self):
         """Clean up after each test"""

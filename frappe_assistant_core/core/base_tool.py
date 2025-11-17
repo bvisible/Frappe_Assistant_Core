@@ -366,7 +366,7 @@ class BaseTool(ABC):
             self.logger.warning(f"Failed to log execution for {self.name}: {str(e)}")
 
     def _sanitize_arguments(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove sensitive data from arguments for logging"""
+        """Remove sensitive data from arguments for logging and handle non-serializable types"""
         sensitive_keys = ["password", "api_key", "secret", "token", "auth"]
         sanitized = {}
 
@@ -374,12 +374,28 @@ class BaseTool(ABC):
             if any(sensitive in key.lower() for sensitive in sensitive_keys):
                 sanitized[key] = "***REDACTED***"
             else:
-                sanitized[key] = value
+                # Use _sanitize_data to handle non-JSON-serializable types
+                # Use a set to track seen objects and prevent infinite recursion
+                sanitized[key] = self._sanitize_data(value, seen=set())
 
         return sanitized
 
-    def _sanitize_data(self, data: Any) -> Any:
-        """Helper method to sanitize data recursively"""
+    def _sanitize_data(self, data: Any, seen: set = None) -> Any:
+        """Helper method to sanitize data recursively, with circular reference protection"""
+        if seen is None:
+            seen = set()
+
+        # Get object id for circular reference detection (only for mutable types)
+        if isinstance(data, (dict, list)):
+            obj_id = id(data)
+            if obj_id in seen:
+                return "<Circular Reference>"
+            seen.add(obj_id)
+
+        # Handle non-JSON-serializable types first
+        if callable(data) or isinstance(data, type):
+            return f"<{type(data).__name__}: {getattr(data, '__name__', str(data)[:50])}>"
+
         if isinstance(data, dict):
             sanitized = {}
             for key, value in data.items():
@@ -397,17 +413,33 @@ class BaseTool(ABC):
                     sanitized[key] = value[:1000] + "[... truncated]"
                 # Recursively sanitize nested objects
                 elif isinstance(value, (dict, list)):
-                    sanitized[key] = self._sanitize_data(value)
+                    sanitized[key] = self._sanitize_data(value, seen)
+                # Handle non-serializable types
+                elif callable(value) or isinstance(value, type):
+                    sanitized[key] = f"<{type(value).__name__}: {getattr(value, '__name__', str(value)[:50])}>"
                 else:
-                    sanitized[key] = value
+                    # Try to use the value as-is, fallback to string representation
+                    try:
+                        json.dumps(value)
+                        sanitized[key] = value
+                    except (TypeError, ValueError):
+                        sanitized[key] = str(value)[:200]
             return sanitized
         elif isinstance(data, list):
             # Truncate large lists but keep first few items
             if len(data) > 10:
-                return [self._sanitize_data(item) for item in data[:3]] + [
+                return [self._sanitize_data(item, seen) for item in data[:3]] + [
                     f"... and {len(data) - 3} more items"
                 ]
             else:
-                return [self._sanitize_data(item) for item in data]
-        else:
+                return [self._sanitize_data(item, seen) for item in data]
+        # Handle primitive JSON-serializable types
+        elif isinstance(data, (str, int, float, bool, type(None))):
             return data
+        # Handle other non-serializable types
+        else:
+            try:
+                json.dumps(data)
+                return data
+            except (TypeError, ValueError):
+                return str(data)[:200]

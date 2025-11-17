@@ -24,10 +24,10 @@ Get up and running in 3 steps:
 ```bash
 # 1. Get the app
 cd frappe-bench
-bench get-app https://github.com/buildswithpaul/Frappe_Assistant_Core
+bench get-app https://github.com/bvisible/Frappe_Assistant_Core
 
 # 2. Install on your site  
-bench --site [site-name] install-app frappe_assistant_core
+bench --site prod.local install-app frappe_assistant_core
 
 ```
 
