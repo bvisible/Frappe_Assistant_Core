@@ -34,7 +34,7 @@ def openid_configuration():
 
     Extends Frappe's built-in endpoint with MCP-required fields.
     """
-    from frappe.integrations.oauth2 import openid_configuration as frappe_openid_config
+    from frappe.integrations.oauth2 import get_openid_configuration as frappe_openid_config
 
     from frappe_assistant_core.utils.oauth_compat import get_oauth_settings
 
@@ -208,7 +208,6 @@ def authorization_server_metadata():
             f"{frappe_url}/api/method/frappe_assistant_core.api.oauth_registration.register_client"
         )
 
-    # Add supported scopes if configured (required by Claude MCP)
     scopes_supported_value = settings.get("scopes_supported")
     if scopes_supported_value and isinstance(scopes_supported_value, str):
         # Clean and parse scopes - handle both single scopes and newline-separated lists
