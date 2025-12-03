@@ -85,7 +85,16 @@ For secure authentication, generate API keys:
 
 ## 🤖 Step 3: Connect with AI
 
-### Option A: Claude Desktop with OAuth (Recommended)
+Choose the AI tool that works best for your workflow:
+
+| Option | Best For | Setup Difficulty | OAuth Support |
+|--------|----------|------------------|---------------|
+| **Claude Desktop** | Desktop users, developers | ⭐ Easy (UI-based) | ✅ Full OAuth 2.0 |
+| **ChatGPT** | Web users, team collaboration | ⭐ Easy (UI-based) | ✅ Full OAuth 2.0 |
+| **MCP Inspector** | Testing, debugging | ⭐⭐ Moderate | ✅ Full OAuth 2.0 |
+| **Custom App** | Embedded integration | ⭐⭐⭐ Advanced | ✅ Full OAuth 2.0 |
+
+### Option A: Claude Desktop with OAuth (Recommended for Desktop)
 
 Connect Claude Desktop using modern OAuth 2.0 authentication:
 
@@ -101,7 +110,30 @@ Connect Claude Desktop using modern OAuth 2.0 authentication:
 
 #### 2. Configure Claude Desktop
 
-Edit your Claude Desktop configuration file:
+**Option A: Using Claude Desktop UI (Recommended - Easiest)**
+
+The easiest way to connect is through Claude Desktop's built-in connector interface:
+
+1. **Open Claude Desktop**
+2. **Click** on the integrations/settings icon
+3. **Navigate to**: Custom Connectors or MCP Servers section
+4. **Click**: "Add Custom Connector" or "+" button
+5. **Fill in the connection details**:
+   - **Name**: `Frappe Assistant` (or any name you prefer)
+   - **Transport Type**: Select `StreamableHTTP`
+   - **Server URL**: `https://your-site.com/api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp`
+   - **Authentication**: Select `OAuth 2.0`
+   - **OAuth Discovery URL**: `https://your-site.com/.well-known/openid-configuration`
+6. **Save** the connector
+7. **Authorize** when prompted (Claude will open your browser)
+
+**Replace `your-site.com` with your actual Frappe site URL.**
+
+> 💡 **Tip**: This UI-based approach is much easier than editing configuration files manually and is available in recent versions of Claude Desktop.
+
+**Option B: Manual Configuration File**
+
+If you prefer manual configuration or your Claude Desktop version doesn't have the UI:
 
 **File Locations:**
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -127,7 +159,7 @@ Edit your Claude Desktop configuration file:
 
 **Replace `your-site.com` with your actual Frappe site URL.**
 
-#### 3. Authorize Claude Desktop
+#### 3. Authorize Claude Desktop (if not done in UI)
 
 1. **Restart Claude Desktop**
 2. **Start a new conversation**
@@ -165,7 +197,45 @@ Test your setup with the MCP Inspector tool:
 
 You can now test tools and see MCP requests/responses!
 
-### Option C: Custom Application Integration
+### Option C: ChatGPT Integration
+
+ChatGPT also supports custom MCP connectors with OAuth authentication:
+
+#### 1. Enable OAuth (Same as Claude Desktop)
+
+Make sure OAuth is enabled in Assistant Core Settings (see Step 1 above).
+
+#### 2. Add Custom Action in ChatGPT
+
+**Using ChatGPT UI:**
+
+1. **Open ChatGPT** (chatgpt.com)
+2. **Go to**: Settings → Custom Actions (or GPT Builder)
+3. **Click**: "Create Custom Action" or "Add Action"
+4. **Select**: MCP Protocol / Custom Connector
+5. **Fill in the connection details**:
+   - **Name**: `Frappe Assistant` (or any name you prefer)
+   - **Transport**: `StreamableHTTP` or `HTTP`
+   - **Endpoint URL**: `https://your-site.com/api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp`
+   - **Authentication**: Select `OAuth 2.0`
+   - **OAuth Discovery URL**: `https://your-site.com/.well-known/openid-configuration`
+6. **Save** and **Authorize** when prompted
+
+**Replace `your-site.com` with your actual Frappe site URL.**
+
+> 💡 **Note**: ChatGPT's MCP support may vary by subscription tier. Custom actions are typically available for ChatGPT Plus, Team, and Enterprise users.
+
+#### 3. Test the Connection
+
+Once authorized, you can use ChatGPT to interact with your Frappe data:
+
+- "List my customers in Frappe"
+- "Create a sales order for customer ABC"
+- "Show me this month's sales report"
+
+**[📖 See ChatGPT integration details](../integrations/CHATGPT_INTEGRATION.md)** *(coming soon)*
+
+### Option D: Custom Application Integration
 
 For custom applications or other MCP clients, see the complete OAuth integration example in our [MCP StreamableHTTP Guide](../architecture/MCP_STREAMABLEHTTP_GUIDE.md#option-3-custom-application-integration).
 
