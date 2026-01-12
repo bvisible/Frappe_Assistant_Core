@@ -5,64 +5,269 @@ All notable changes to Frappe Assistant Core will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.3.0] - 2025-10-28
+## [2.3.0] - 2026-01-09
 
-### ✨ Enhanced - send_email Tool
+### 🎯 Major Feature - Prompt Templates System
 
-#### Smart Recipient Resolution
-- **Added** ambiguity detection: Returns list when multiple people match name
-- **Added** fuzzy search: Suggests similar names for typos (60% similarity threshold)
-- **Improved** error messages: Clear guidance with actionable suggestions
-- **Added** diagnostic logging: Track resolution process for debugging
+#### MCP Prompts Support
+FAC now supports the MCP `prompts/list` and `prompts/get` protocol methods, enabling "Prompt Engineering as a Service" where domain experts create reusable, parameterized prompts that users can customize and execute via AI clients.
 
-#### How It Works
-- **Single match** (1 person named "Jeremy"): Auto-resolves to email, sends immediately
-- **Multiple matches** (3 people named "Jeremy"): Returns list, asks user to clarify
-- **Typo tolerance** ("Jeremmy"): Fuzzy search suggests "Jeremy (85% match), Jerome (70%)"
-- **Not found** ("Zxyzzy"): Helpful error with search_link suggestion
+- **Added** full MCP prompts protocol support (`prompts/list`, `prompts/get`)
+- **Introduced** database-driven prompt templates replacing hardcoded prompts
+- **Enabled** prompt rendering with Jinja2, Format String, and Raw engines
+- **Implemented** usage analytics tracking (use_count, last_used)
 
-#### Examples
-```python
-# Before: Ambiguous match → sent to wrong person or failed
-send_email(recipient="Jeremy", message="Réunion demain?")
+#### New DocTypes
 
-# After: Detects ambiguity → asks user
-{
-  "success": false,
-  "matches": [
-    {"name": "Jeremy Smith", "email": "jeremy.smith@..."},
-    {"name": "Jérémy Christillin", "email": "jeremy@bvisible.ch"}
-  ],
-  "message": "🤔 J'ai trouvé 2 personnes nommées 'Jeremy'..."
-}
-```
+| DocType | Purpose |
+|---------|---------|
+| **Prompt Template** | Main template with content, arguments, and metadata |
+| **Prompt Template Argument** | Child table defining configurable parameters |
+| **Prompt Category** | Hierarchical tree structure for organization |
 
-#### Technical Details
-- **Search scope**: User.full_name, User.email, Contact.first_name, Contact.email_id
-- **Fuzzy algorithm**: difflib.SequenceMatcher with 60% similarity threshold
-- **Detection limit**: Increased from 1 to 5 matches for ambiguity awareness
-- **Logging**: Comprehensive debug logs with emoji indicators (🔍 ✉️ ✅ ❌)
+#### Prompt Template Features
+- **Template Content**: Jinja2 templates with `{{ placeholders }}` for dynamic content
+- **Configurable Arguments**: Define parameters with types (string, number, boolean, select, multiselect)
+- **Argument Validation**: Required fields, regex patterns, allowed values, min/max length
+- **Default Values**: Pre-populate optional arguments
+- **Live Preview**: Test template rendering before publishing
 
-#### Improved Tool Description
-- **Enhanced** LLM guidance with detailed examples and workflow explanation
-- **Added** emoji-based visual structure for better comprehension
-- **Documented** all edge cases (ambiguity, typos, not found)
-- **Included** best practices and common pitfalls
+#### Access Control & Sharing
+- **Visibility Levels**: Private (owner only), Shared (specific roles), Public (all users)
+- **Role-Based Sharing**: Share prompts with specific Frappe roles
+- **System Templates**: Protected templates installed via migration (cannot be deleted)
+- **Permission Filtering**: MCP returns only prompts accessible to current user
 
-### 🔧 Technical Changes
-- **Modified** `_find_recipient()`: +105 lines (ambiguity detection, logging)
-- **Added** `_fuzzy_search_recipients()`: +80 lines (new method)
-- **Modified** `execute()`: +43 lines (enhanced error handling)
-- **Updated** tool description: Complete rewrite with examples
+#### Versioning & History
+- **Automatic Versioning**: Version number increments on significant changes
+- **Version History**: Full change history using Frappe's `track_changes`
+- **Restore Versions**: Rollback to any previous version
+- **Duplicate as Private**: Copy system/public templates for customization
+
+#### System Prompt Templates
+Pre-built templates installed via `bench migrate`:
+- `manufacturing_analysis` - Manufacturing & production analysis
+- `sales_analysis` - Sales performance and trends
+- `purchase_analysis` - Procurement and supplier analysis
+- `hr_analysis` - HR metrics and workforce analysis
+- `crm_analysis` - Customer relationship analysis
+- `doctype_documentation` - DocType documentation generator
+- `data_quality_audit` - Data quality and integrity audits
+
+#### System Categories
+Hierarchical categories for organization:
+- Data Analysis (parent)
+  - Manufacturing, Sales & CRM, Purchasing, HR & Payroll
+- Data Quality
+- Documentation
+- System Administration
 
 ### 🐛 Bug Fixes
-- **Fixed** "recipient not found" when user provides name instead of email
-- **Fixed** silent failure when multiple people match (now asks for clarification)
 
-### 📊 Impact
-- **Backward compatible**: All existing code continues to work
-- **No breaking changes**: Direct email addresses work exactly as before
-- **Enhanced UX**: Better error messages guide users to correct usage
+#### OAuth Token Timezone Fix (#83)
+- **Fixed** timezone mismatch in OAuth token expiration validation
+- **Changed** from `datetime.datetime.now()` to Frappe's `now_datetime()` for timezone-aware comparisons
+- **Resolved** tokens appearing expired due to server timezone vs UTC comparison
+- **Impact**: Users in non-UTC timezones no longer experience premature token expiration
+
+#### CI/CD Pipeline Fixes
+- **Fixed** CI failing due to Python version incompatibility with Frappe 16 dev branch
+- **Changed** bench init to explicitly use `--frappe-branch version-15` for stable builds
+- **Changed** ERPNext installation to use `--branch version-15`
+- **Upgraded** CI Python version from 3.10 to 3.12
+
+#### Code Quality - cur_frm Deprecation Fixes
+- **Fixed** semgrep `frappe-cur-frm-usage` violations in `prompt_template.js`
+- **Replaced** `cur_frm.reload_doc()` with `frappe.set_route()` for proper navigation
+- **Fixed** JavaScript to use `frappe.ui.form.get_open_docs()` instead of deprecated `cur_frm`
+
+### 🎨 UI/UX Improvements
+
+#### Dark Theme Support for FAC Admin Page
+- **Fixed** MCP Endpoint URL not visible in dark theme
+- **Updated** `.fac-endpoint-url` styling with proper `var(--control-bg)` background
+- **Fixed** toggle switch styling with `var(--gray-400)` and border for better contrast
+- **Updated** slider knob to use `var(--card-bg)` with shadow for dark mode visibility
+- **Fixed** tool badge styling with `var(--bg-color)` and border
+- **Added** `color: var(--text-color)` to table cells for proper dark mode support
+- **Ensured** checked toggle slider knob remains white for visibility in both themes
+
+#### Dark Theme Support for Assistant Core Settings
+- **Updated** alert boxes to use CSS variables (`var(--alert-bg-info)`, `var(--alert-text-info)`)
+- **Fixed** Plugin System Status header styling for dark mode
+- **Added** CSS rules for `.plugin-card`, form controls, and card headers
+- **Updated** search input and filter dropdowns to use theme variables
+- **Fixed** border colors throughout the plugin management interface
+
+### 📚 Documentation
+
+- **Added** comprehensive [Prompt Templates User Guide](docs/guides/prompt-templates.md)
+- **Updated** `MCP_STREAMABLEHTTP_GUIDE.md` with timezone-aware token validation example
+- **Updated** `TECHNICAL_DOCUMENTATION.md` with correct `now_datetime()` usage
+
+### 🔧 Technical Improvements
+
+- **Added** `PromptTemplateManager` class for centralized prompt operations
+- **Implemented** permission query conditions for prompt visibility filtering
+- **Added** migration hooks for installing/updating system prompts and categories
+- **Improved** code consistency by using Frappe's utility functions for datetime operations
+- **Enhanced** theme support using CSS variables throughout admin interfaces
+- **Better** maintainability with standardized styling patterns
+
+### 🔄 Migration Notes
+
+After upgrading to v2.3.0, run:
+```bash
+bench --site your-site migrate
+```
+
+This will install:
+- System prompt categories
+- System prompt templates
+- Required database schema changes
+
+## [2.2.2] - 2025-12-03
+
+### 🏢 Repository Migration & Rebranding
+
+#### GitHub Repository Update
+- **Migrated** repository from `clinu/Frappe_Assistant_Core` to `buildswithpaul/Frappe_Assistant_Core`
+- **Updated** all documentation links, URLs, and references across the project
+- **Updated** manifest.json, README.md, BUILD.md, and configuration files
+- **Maintained** backwards compatibility - existing installations continue to work
+
+### 🚀 Enhanced
+
+#### OAuth 2.0 Client Registration Enhancements
+- **Fixed** dynamic client registration to always return `client_secret` in response
+- **Added** support for public clients that receive secrets but use `token_endpoint_auth_method: "none"`
+- **Enhanced** registration response to include all optional RFC 7591 metadata fields:
+  - `client_uri` - Client homepage URL
+  - `logo_uri` - Client logo URL
+  - `scope` - Requested scopes
+  - `contacts` - Client contact information
+  - `tos_uri` - Terms of Service URL
+  - `policy_uri` - Privacy Policy URL
+  - `software_id` - Client software identifier
+  - `software_version` - Client software version
+- **Improved** MCP Inspector compatibility with complete registration responses
+- **Benefits**:
+  - Full RFC 7591 compliance
+  - Better client identification and metadata
+  - Improved debugging and client management
+
+#### OAuth Discovery API Updates
+- **Updated** OpenID Configuration endpoint to use `get_openid_configuration` from Frappe
+- **Improved** compatibility with latest Frappe OAuth2 API changes
+- **Maintained** backward compatibility with Frappe v15 and v16
+
+#### Manifest & Tool Configuration Improvements
+- **Refactored** tools array in manifest.json with updated names and descriptions
+- **Added** new tools: `delete_document`, `submit_document`
+- **Reorganized** tool descriptions for consistency and improved user experience
+- **Improved** tool ordering for better discoverability
+- **Updated** runtime specification from `runtime` to `runtimes` for future extensibility
+- **Clarified** Python version requirements (>=3.8,<4.0)
+
+#### Documentation Improvements
+- **Enhanced** Getting Started guide with UI-based connector setup for Claude Desktop
+- **Added** ChatGPT integration section with complete setup instructions
+- **Added** comparison table for different AI connection options
+- **Improved** OAuth setup instructions with both UI and manual configuration methods
+- **Updated** all repository references to new GitHub location
+- **Added** tips and best practices for easier onboarding
+- **Benefits**:
+  - Much easier setup with UI-based configuration (no JSON editing)
+  - Support for both Claude Desktop and ChatGPT clearly documented
+  - Better user guidance with comparison table and recommendations
+
+### 🔧 Changed
+
+#### API Endpoint Updates
+- **Updated** Claude Desktop extension server bridge API endpoint
+- **Changed** from: `/api/method/frappe_assistant_core.api.assistant_api.handle_assistant_request`
+- **Changed** to: `/api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp`
+- **Note**: This change is for internal bridge configuration; external MCP endpoint remains unchanged
+## [2.2.1] - 2025-11-24
+
+### 🚀 Enhanced
+
+#### Prepared Report Polling Support
+- **Implemented** automatic polling logic for prepared (background) reports
+- **Added** exponential backoff strategy (2→4→6→9→13 seconds) to efficiently wait for report completion
+- **Enabled** seamless UX where AI gets report data without interrupting conversation flow
+- **Eliminated** manual retry requests - system automatically polls until report is ready
+- **Added** comprehensive error handling for timeouts, failures, and edge cases
+- **Maintained** backward compatibility - cached reports still return immediately
+- **Benefits**:
+  - Users no longer need to manually retry failed reports
+  - Reduced database load with smart exponential backoff
+  - Production-ready with graceful timeout handling (max 30 seconds)
+  - Transparent progress tracking via logging
+
+#### Multi-Tool Orchestration for run_python_code
+- **Implemented** Tools API for calling other tools inside Python sandbox
+- **Achieved** 80-95% token savings for data analysis workflows by processing data in sandbox instead of passing through LLM context
+- **Added** `tools.get_documents()` and `tools.generate_report()` methods for orchestrated data fetching
+- **Enabled** complex analysis patterns: fetch data inside code, process with pandas/numpy, return only insights to LLM
+- **Updated** tool description to make orchestration the PRIMARY recommended approach
+- **Example**: Instead of calling `list_documents` separately (sends 100 invoices to LLM), write Python code that calls `tools.get_documents()` internally (only analysis results go to LLM)
+
+#### Authentication & Security Enhancements
+- **Refactored** MCP endpoint authentication to support both OAuth 2.0 Bearer tokens and API key/secret methods
+- **Added** `_authenticate_mcp_request()` function with clear separation of authentication logic
+- **Enabled** STDIO clients (like bridge implementations) to authenticate via API key/secret: `Authorization: token <api_key>:<api_secret>`
+- **Improved** error handling for unauthorized requests with proper 401 responses and WWW-Authenticate headers
+- **Enhanced** OAuth discovery endpoint to always bypass cache for fresh configuration
+- **Fixed** OAuth scope parsing to handle both space-separated and newline-separated lists, preventing duplicates
+
+#### Plugin & Tool Registry Improvements
+- **Fixed** custom tools appearing in tools/list API even when custom_tools plugin was disabled
+- **Added** plugin state check in `_get_external_tools()` to respect disabled state for hook-registered tools
+- **Implemented** comprehensive cache clearing after plugin toggle (plugin manager cache, tool registry cache)
+- **Improved** plugin toggle UX with disabled state during API calls and error recovery
+
+#### Data Compatibility Fixes
+- **Fixed** frappe._dict to plain dict conversion for pandas DataFrame compatibility
+- **Resolved** "invalid __array_struct__" errors when using pandas with tool data
+- **Updated** `tools.get_documents()` and `tools.get_document()` to return plain Python dicts
+- **Updated** `report_tools.py` to convert report data rows to plain dicts
+- **Added** comprehensive null value handling guidance in tool descriptions
+
+#### MCP Server Cleanup
+- **Removed** unused `@mcp.tool` decorator method (~95 lines of dead code)
+- **Removed** `_generate_input_schema()` and `_get_json_type()` helper methods
+- **Clarified** that BaseTool is the only supported tool development pattern
+- **Updated** MCPServer class documentation with correct usage examples
+- **Removed** unused imports (Callable, Parameter, getdoc, signature)
+
+#### Admin Page & UX Improvements
+- **Improved** plugin toggle to disable checkbox during API calls
+- **Added** state reset on toggle errors to prevent UI inconsistencies
+- **Enhanced** endpoint URL display with fallback handling
+- **Fixed** AssistantCoreSettings to populate endpoint URLs on load and before save
+- **Ensured** MCP and OAuth discovery URLs are always up-to-date
+
+### 🐛 Bug Fixes
+- **Fixed** custom_tools plugin state not being respected for external tools from hooks
+- **Fixed** pandas DataFrame creation failures with frappe._dict objects
+- **Fixed** null value formatting errors in run_python_code examples
+- **Fixed** endpoint URL population timing in settings DocType
+- **Fixed** plugin cache not refreshing after state changes
+- **Fixed** prepared (background) reports failing with "Report is being prepared" error - now polls automatically until ready
+
+### 📚 Documentation
+- **Updated** run_python_code tool description with orchestration patterns and best practices
+- **Added** clear CORRECT vs INCORRECT usage examples
+- **Added** data handling best practices section with null value handling
+- **Updated** MCPServer class docstring to reflect BaseTool-only approach
+- **Improved** code comments explaining authentication flow and data conversion
+
+### 🔧 Technical Improvements
+- **Simplified** authentication code structure with dedicated helper function
+- **Improved** error messages for authentication failures
+- **Enhanced** logging for plugin state changes and tool discovery
+- **Optimized** tool registry to skip external tool loading when plugin disabled
 
 ## [2.2.0] - 2025-10-13
 
@@ -370,10 +575,13 @@ See [Git history](hhttps://github.com/buildswithpaul/Frappe_Assistant_Core/commi
 
 | Version | Release Date | Support Status | Notes |
 |---------|--------------|----------------|--------|
-| 2.2.0   | 2025-10-13   | ✅ Current     | StreamableHTTP transport migration |
-| 2.0.1   | 2025-07-26   | ✅ Supported   | Bug fixes & improvements |
-| 2.0.0   | 2025-01-20   | ✅ Supported   | Major architecture overhaul |
-| 1.x     | 2024         | ⚠️ Legacy      | Legacy versions |
+| 2.3.0   | 2026-01-09   | ✅ Current     | **MCP Prompts support**, Prompt Templates, dark theme fixes |
+| 2.2.2   | 2025-12-03   | ✅ Supported   | Repository migration & OAuth enhancements |
+| 2.2.1   | 2025-11-24   | ✅ Supported   | Prepared report polling, multi-tool orchestration |
+| 2.2.0   | 2025-10-13   | ✅ Supported   | StreamableHTTP transport migration |
+| 2.0.1   | 2025-07-26   | ⚠️ Legacy      | Bug fixes & improvements |
+| 2.0.0   | 2025-01-20   | ⚠️ Legacy      | Major architecture overhaul |
+| 1.x     | 2024         | ❌ Deprecated  | Legacy versions |
 
 ## Upgrade Path
 

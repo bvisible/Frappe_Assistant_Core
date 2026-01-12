@@ -113,11 +113,12 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
             .fac-tool-badge {
                 display: inline-block;
                 padding: 3px 10px;
-                background: var(--bg-light-gray);
+                background: var(--bg-color);
                 border-radius: 12px;
                 font-size: 11px;
                 color: var(--text-muted);
                 font-weight: 500;
+                border: 1px solid var(--border-color);
             }
             .fac-tool-toggle {
                 margin: 0;
@@ -168,8 +169,9 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
                 left: 0;
                 right: 0;
                 bottom: 0;
-                background-color: var(--gray-300);
+                background-color: var(--gray-400);
                 transition: .3s;
+                border: 1px solid var(--border-color);
             }
             .slider:before {
                 position: absolute;
@@ -178,8 +180,9 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
                 width: 18px;
                 left: 3px;
                 bottom: 3px;
-                background-color: white;
+                background-color: var(--card-bg);
                 transition: .3s;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
             }
             input:checked + .slider {
                 background-color: var(--primary);
@@ -206,8 +209,8 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
             .fac-settings-value {
                 font-size: 13px;
                 color: var(--text-color);
-                padding: 8px 12px;
-                background: var(--bg-color);
+                padding: 10px 12px;
+                background: var(--control-bg);
                 border-radius: var(--border-radius);
                 border: 1px solid var(--border-color);
             }
@@ -215,7 +218,6 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
                 font-family: var(--font-stack-monospace);
                 font-size: 12px;
                 word-break: break-all;
-                color: var(--primary);
             }
             .fac-table {
                 width: 100%;
@@ -235,10 +237,15 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
             .fac-table td {
                 padding: 10px 12px;
                 font-size: 13px;
+                color: var(--text-color);
                 border-bottom: 1px solid var(--border-color);
             }
             .fac-table tbody tr:hover {
                 background: var(--bg-color);
+            }
+            /* Ensure checked toggle slider knob is visible in dark mode */
+            input:checked + .slider:before {
+                background-color: white;
             }
         </style>
     `;
@@ -340,7 +347,8 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
         frappe.call({
             method: "frappe.client.get",
             args: {
-                doctype: "Assistant Core Settings"
+                doctype: "Assistant Core Settings",
+                name: "Assistant Core Settings"  // Required for Single DocTypes
             },
             callback: function(response) {
                 if (response.message) {
@@ -365,11 +373,18 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
                         toggleText.html('<i class="fa fa-play"></i> Enable');
                     }
 
-                    // Update MCP Endpoint URL from settings
-                    if (settings.mcp_endpoint_url) {
-                        $('#fac-mcp-endpoint').text(settings.mcp_endpoint_url);
+                    // Update MCP Endpoint URL from settings (with fallback)
+                    let endpointUrl = settings.mcp_endpoint_url;
+                    if (!endpointUrl || endpointUrl === '') {
+                        // Generate URL client-side if not set
+                        endpointUrl = window.location.origin + '/api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp';
                     }
+                    $('#fac-mcp-endpoint').text(endpointUrl);
                 }
+            },
+            error: function(r) {
+                console.error('Failed to load server status:', r);
+                $('#fac-mcp-endpoint').text('Error loading endpoint');
             }
         });
     }
@@ -498,33 +513,48 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
 
     // Toggle plugin enabled/disabled
     function togglePlugin(pluginName, enabled) {
+        // Disable checkbox during API call to prevent double-clicks
+        const checkbox = $(`.fac-plugin-toggle[data-plugin="${pluginName}"]`);
+        const originalState = checkbox.prop('checked');
+        checkbox.prop('disabled', true);
+
         frappe.call({
             method: "frappe_assistant_core.api.admin_api.toggle_plugin",
             args: {
                 plugin_name: pluginName,
                 enable: enabled
             },
+            freeze: true,
+            freeze_message: __('Updating plugin...'),
             callback: function(response) {
                 if (response.message && response.message.success) {
                     frappe.show_alert({
                         message: response.message.message,
                         indicator: enabled ? 'green' : 'orange'
                     });
-                    loadStats(); // Refresh stats
+                    // Refresh both registry and stats after successful toggle
+                    loadStats();
+                    loadToolRegistry();
                 } else {
+                    // Reset checkbox to original state on error
+                    checkbox.prop('checked', originalState);
                     frappe.show_alert({
                         message: response.message?.message || 'Unknown error',
                         indicator: 'red'
                     });
-                    loadToolRegistry(); // Reload to reset checkbox
                 }
             },
             error: function() {
+                // Reset checkbox to original state on error
+                checkbox.prop('checked', originalState);
                 frappe.show_alert({
                     message: 'Error toggling plugin',
                     indicator: 'red'
                 });
-                loadToolRegistry(); // Reload to reset checkbox
+            },
+            always: function() {
+                // Re-enable checkbox
+                checkbox.prop('disabled', false);
             }
         });
     }
@@ -592,10 +622,12 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
     loadToolRegistry();
     loadRecentActivity();
 
-    // Auto-refresh every 30 seconds
+    // Auto-refresh every 30 seconds (but NOT tool registry to avoid disrupting user interactions)
     setInterval(function() {
         loadServerStatus();
         loadStats();
         loadRecentActivity();
+        // Note: We intentionally don't auto-refresh loadToolRegistry() here
+        // to avoid interfering with user plugin toggle interactions
     }, 30000);
 };

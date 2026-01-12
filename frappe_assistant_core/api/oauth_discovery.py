@@ -34,11 +34,17 @@ def openid_configuration():
 
     Extends Frappe's built-in endpoint with MCP-required fields.
     """
-    from frappe.integrations.oauth2 import openid_configuration as frappe_openid_config
-
     from frappe_assistant_core.utils.oauth_compat import get_oauth_settings
 
     # Call Frappe's built-in method (it sets frappe.local.response directly)
+    # Note: Function name varies by version (openid_configuration in v15, get_openid_configuration in v16+)
+    try:
+        # Try v16+ first
+        from frappe.integrations.oauth2 import get_openid_configuration as frappe_openid_config
+    except ImportError:
+        # Fallback to v15
+        from frappe.integrations.oauth2 import openid_configuration as frappe_openid_config
+
     frappe_openid_config()
 
     # Get the response that Frappe set
@@ -208,6 +214,22 @@ def authorization_server_metadata():
             f"{frappe_url}/api/method/frappe_assistant_core.api.oauth_registration.register_client"
         )
 
+    scopes_supported_value = settings.get("scopes_supported")
+    if scopes_supported_value and isinstance(scopes_supported_value, str):
+        # Clean and parse scopes - handle both single scopes and newline-separated lists
+        scopes = []
+        for line in scopes_supported_value.split("\n"):
+            line = line.strip()
+            if line:
+                # Further split by whitespace to handle space-separated scopes
+                for scope in line.split():
+                    scope = scope.strip()
+                    if scope and scope not in scopes:  # Avoid duplicates
+                        scopes.append(scope)
+
+        if scopes:
+            metadata["scopes_supported"] = scopes
+
     return metadata
 
 
@@ -223,7 +245,10 @@ def protected_resource_metadata():
     """
     from frappe_assistant_core.utils.oauth_compat import get_oauth_settings
 
-    settings = get_oauth_settings()
+    # Bypass cache for discovery endpoints to ensure fresh data
+    # This is important because OAuth clients may cache this response
+    # and we want them to see updates immediately
+    settings = get_oauth_settings(use_cache=False)
 
     # Check if protected resource metadata is enabled
     if not settings.get("show_protected_resource_metadata", True):
@@ -260,14 +285,23 @@ def protected_resource_metadata():
     }
 
     # Add supported scopes if configured
-    if settings.get("scopes_supported"):
+    scopes_supported_value = settings.get("scopes_supported")
+    if scopes_supported_value and isinstance(scopes_supported_value, str):
+        # Clean and parse scopes - handle both single scopes and newline-separated lists
         scopes = []
-        for line in settings.get("scopes_supported").split("\n"):
-            scope = line.strip()
-            if scope:
-                scopes.append(scope)
+        # Split by newlines and also by spaces (to handle "openid profile" format)
+        for line in scopes_supported_value.split("\n"):
+            line = line.strip()
+            if line:
+                # Further split by whitespace to handle space-separated scopes
+                for scope in line.split():
+                    scope = scope.strip()
+                    if scope and scope not in scopes:  # Avoid duplicates
+                        scopes.append(scope)
+
         if scopes:
             metadata["scopes_supported"] = scopes
+            frappe.logger().debug(f"Protected Resource Metadata: Added scopes_supported = {scopes}")
 
     # Remove None values
     _del_none_values(metadata)
