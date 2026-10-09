@@ -46,11 +46,22 @@ def complete_document(doc):
     return True
 
 
+# //// Neoffice — maintenance#1366, second defect in the same check. Frappe lists `parent` and `parenttype`
+# //// as missing on every row of a table, because insert() writes them AFTER the document is named: before
+# //// it they are always empty. The first version of the check reported them, so no document with a table
+# //// (a quotation, a contact with its e-mails) could be created: "Missing required fields: parent".
+ROW_FIELDS_SET_BY_INSERT = ("parent", "parenttype")
+
+
 def missing_required_fields(doc):
     """Names of the mandatory fields still empty on the document and on its rows."""
     missing = [fieldname for fieldname, _message in doc._get_missing_mandatory_fields()]
     for row in doc.get_all_children():
-        missing.extend(fieldname for fieldname, _message in row._get_missing_mandatory_fields())
+        missing.extend(
+            fieldname
+            for fieldname, _message in row._get_missing_mandatory_fields()
+            if fieldname not in ROW_FIELDS_SET_BY_INSERT
+        )
     return list(dict.fromkeys(missing))
 
 

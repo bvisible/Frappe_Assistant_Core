@@ -187,6 +187,13 @@ class TestRequiredFieldsOfCreateDocument(BaseAssistantTest):
 
         self.assertEqual(missing_required_fields(document), ["customer", "qty"])
 
+    def test_the_parent_of_a_row_is_not_missing_before_the_document_is_inserted(self):
+        # insert() writes parent and parenttype after naming the document: they are empty until then
+        row = _FakeDocument(["parent", "parenttype", "qty"])
+        document = _FakeDocument([], children=[row])
+
+        self.assertEqual(missing_required_fields(document), ["qty"])
+
     def test_a_field_reported_by_the_document_and_by_a_row_is_listed_once(self):
         row = _FakeDocument(["qty"])
         other_row = _FakeDocument(["qty"])
@@ -210,3 +217,33 @@ class TestCreateDocumentReportsWhatIsReallyMissing(BaseAssistantTest):
         self.assertIn("price_list_name", result.get("required_fields", []))
         self.assertEqual(result.get("provided_fields"), ["selling"])
         self.assertEqual(result.get("doctype"), "Price List")
+
+
+class TestCreateDocumentWithATable(BaseAssistantTest):
+    """A document that carries a table is created, its rows included (maintenance#1366)."""
+
+    def test_a_contact_with_its_email_rows_is_created(self):
+        registry = get_tool_registry()
+        if not registry.has_tool("create_document"):
+            self.skipTest("create_document tool not available")
+        first_name = f"{TEST_PREFIX} {frappe.generate_hash(length=6)}"
+        name = None
+        try:
+            result = registry.execute_tool(
+                "create_document",
+                {
+                    "doctype": "Contact",
+                    "data": {
+                        "first_name": first_name,
+                        "email_ids": [{"email_id": "created-by-tool@example.com", "is_primary": 1}],
+                    },
+                },
+            )
+            self.assertTrue(result.get("success"), result)
+            name = result.get("name")
+            contact = frappe.get_doc("Contact", name)
+            self.assertEqual([row.email_id for row in contact.email_ids], ["created-by-tool@example.com"])
+        finally:
+            if name:
+                frappe.delete_doc("Contact", name, force=1, ignore_permissions=True)
+                frappe.db.commit()
