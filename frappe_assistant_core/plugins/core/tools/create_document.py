@@ -27,6 +27,33 @@ from frappe import _
 from frappe_assistant_core.core.base_tool import BaseTool
 
 
+# //// Neoffice — added functions (no upstream equivalent), maintenance#1366. Upstream compared the
+# //// DocType's required fields with what the caller sent, BEFORE the document was built. A quotation was
+# //// refused for "conversion_rate, price_list_currency, plc_conversion_rate" although ERPNext fills all
+# //// three itself (validate fills the first, set_missing_values the three), and a legitimate 0 or False
+# //// counted as missing. The check now asks the completed document, with Frappe's own list of missing
+# //// mandatory fields.
+def complete_document(doc):
+    """Let the document fill what it computes itself, as the desk does before a save.
+
+    Returns False when it could not (an unknown item, say): the caller then lets validate and insert
+    report the real cause rather than claim that a field is missing.
+    """
+    try:
+        doc.run_method("set_missing_values")
+    except Exception:
+        return False
+    return True
+
+
+def missing_required_fields(doc):
+    """Names of the mandatory fields still empty on the document and on its rows."""
+    missing = [fieldname for fieldname, _message in doc._get_missing_mandatory_fields()]
+    for row in doc.get_all_children():
+        missing.extend(fieldname for fieldname, _message in row._get_missing_mandatory_fields())
+    return list(dict.fromkeys(missing))
+
+
 class DocumentCreate(BaseTool):
     """
     Tool for creating new Frappe documents.
@@ -184,22 +211,6 @@ class DocumentCreate(BaseTool):
             meta = frappe.get_meta(doctype)
             table_fields = {f.fieldname: f.options for f in meta.fields if f.fieldtype == "Table"}
 
-            # Validate required fields
-            required_fields = [
-                f.fieldname for f in meta.fields if f.reqd and not f.default and f.fieldtype != "Table"
-            ]
-            missing_fields = [f for f in required_fields if f not in data or not data[f]]
-
-            if missing_fields:
-                return {
-                    "success": False,
-                    "error": f"Missing required fields: {', '.join(missing_fields)}",
-                    "required_fields": required_fields,
-                    "provided_fields": list(data.keys()),
-                    "suggestion": f"Use get_doctype_info tool with doctype='{doctype}' to see all required fields and their types",
-                    "doctype": doctype,
-                }
-
             # Set field values with proper child table handling
             for field, value in data.items():
                 if field in table_fields:
@@ -217,6 +228,25 @@ class DocumentCreate(BaseTool):
                 else:
                     # Handle regular fields
                     setattr(doc, field, value)
+
+            # //// Neoffice — the required-field check moved here from before the document was built (see
+            # //// complete_document). When the document could not complete itself, insert reports why.
+            if complete_document(doc):
+                missing_fields = missing_required_fields(doc)
+                if missing_fields:
+                    required_fields = [
+                        f.fieldname
+                        for f in meta.fields
+                        if f.reqd and not f.default and f.fieldtype != "Table"
+                    ]
+                    return {
+                        "success": False,
+                        "error": f"Missing required fields: {', '.join(missing_fields)}",
+                        "required_fields": required_fields,
+                        "provided_fields": list(data.keys()),
+                        "suggestion": f"Use get_doctype_info tool with doctype='{doctype}' to see all required fields and their types",
+                        "doctype": doctype,
+                    }
 
             # Handle validation-only mode
             if validate_only:
@@ -345,7 +375,13 @@ class DocumentCreate(BaseTool):
                         "suggestion": "1. Verify that referenced records (like customers, items, suppliers) exist\n2. Use search_documents tool to find correct record names\n3. Check spelling and exact names",
                     }
                 )
-            elif "mandatory" in error_msg.lower() or "required" in error_msg.lower():
+            elif (
+                isinstance(e, frappe.MandatoryError)
+                or "mandatory" in error_msg.lower()
+                or "required" in error_msg.lower()
+            ):
+                # //// Neoffice — MandatoryError added: its message is the user's language, so the words
+                # //// "mandatory" and "required" never matched it.
                 result.update(
                     {
                         "error_type": "missing_required_field",

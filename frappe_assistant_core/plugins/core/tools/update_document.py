@@ -27,6 +27,38 @@ from frappe import _
 from frappe_assistant_core.core.base_tool import BaseTool
 
 
+# //// Neoffice — added function (no upstream equivalent), maintenance#1366. Upstream wrote
+# //// setattr(doc, field, value) for every field, so a table received the plain dicts it was given and
+# //// doc.save() failed on them with "'dict' object has no attribute 'is_new'": no table (a quotation's
+# //// lines, a contact's e-mails) could be updated through the tool.
+def set_table_rows(doc, fieldname, rows):
+    """Set a table from a list of row objects, the way a form saves it.
+
+    A row carrying the `name` of an existing row updates that row in place: the fields it does not cite
+    keep their value, so rows can be reordered or added without sending their text again. A row without
+    a name is new. An existing row that is not listed is removed. The rows are numbered by position.
+    """
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ValueError(f"Table '{fieldname}' requires a list of objects, one per row")
+
+    existing = {row.name: row for row in doc.get(fieldname)}
+    merged = []
+    for row in rows:
+        name = row.get("name")
+        if name:
+            current = existing.get(name)
+            if current is None:
+                raise ValueError(f"Table '{fieldname}' has no row named '{name}'")
+            current.update({key: value for key, value in row.items() if key not in ("name", "idx")})
+            merged.append(current)
+        else:
+            merged.append({key: value for key, value in row.items() if key != "idx"})
+
+    doc.set(fieldname, merged)
+    for position, row in enumerate(doc.get(fieldname), start=1):
+        row.idx = position
+
+
 class DocumentUpdate(BaseTool):
     """
     Tool for updating existing Frappe documents.
@@ -151,8 +183,14 @@ class DocumentUpdate(BaseTool):
                 return result
 
             # Update field values
+            # //// Neoffice — a table goes through set_table_rows() (see its comment); every other
+            # //// field is set as upstream did.
+            table_fields = {f.fieldname for f in frappe.get_meta(doctype).get_table_fields()}
             for field, value in data.items():
-                setattr(doc, field, value)
+                if field in table_fields:
+                    set_table_rows(doc, field, value)
+                else:
+                    setattr(doc, field, value)
 
             # Save document
             doc.save()
