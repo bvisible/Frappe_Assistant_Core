@@ -37,6 +37,30 @@ import traceback
 import types as _types
 from contextlib import redirect_stderr, redirect_stdout
 
+# Names user code reaches as modules. The sandbox has no import statement, so
+# run_python_code rewrites ``import x`` / ``from x import y`` for these into
+# reads from the ``_preloaded_modules`` mapping built below.
+PRELOADED_MODULES = (
+    "pandas",
+    "numpy",
+    "frappe",
+    "math",
+    "statistics",
+    "decimal",
+    "fractions",
+    "datetime",
+    "json",
+    "re",
+    "random",
+    "collections",
+    "itertools",
+    "functools",
+    "heapq",
+    "bisect",
+    "copy",
+    "string",
+)
+
 # ---------------------------------------------------------------------------
 # Resource limit helpers (applied permanently — the process is disposable)
 # ---------------------------------------------------------------------------
@@ -434,14 +458,21 @@ def _setup_execution_environment(user: str) -> dict:
     }
 
     # Standard libraries
+    import bisect
+    import collections
+    import copy
     import datetime
     import decimal
     import fractions
+    import functools
+    import heapq
+    import itertools
     import json as _json
     import math
     import random
     import re
     import statistics
+    import string
 
     env.update(
         {
@@ -453,6 +484,13 @@ def _setup_execution_environment(user: str) -> dict:
             "json": _AttrSafeModule(_json, "json"),
             "re": _AttrSafeModule(re, "re"),
             "random": _AttrSafeModule(random, "random"),
+            "collections": _AttrSafeModule(collections, "collections"),
+            "itertools": _AttrSafeModule(itertools, "itertools"),
+            "functools": _AttrSafeModule(functools, "functools"),
+            "heapq": _AttrSafeModule(heapq, "heapq"),
+            "bisect": _AttrSafeModule(bisect, "bisect"),
+            "copy": _AttrSafeModule(copy, "copy"),
+            "string": _AttrSafeModule(string, "string"),
         }
     )
 
@@ -501,6 +539,11 @@ def _setup_execution_environment(user: str) -> dict:
         }
     )
 
+    # Rewritten imports read from here rather than from the global names, so a
+    # second ``from datetime import timedelta`` still resolves after
+    # ``from datetime import datetime`` has rebound ``datetime`` to the class.
+    env["_preloaded_modules"] = _types.MappingProxyType({name: env[name] for name in PRELOADED_MODULES})
+
     return env
 
 
@@ -528,6 +571,13 @@ _EXCLUDED_VARS = frozenset(
         "statistics",
         "decimal",
         "fractions",
+        "collections",
+        "itertools",
+        "functools",
+        "heapq",
+        "bisect",
+        "copy",
+        "string",
         "pandas",
         "numpy",
         "tools",
