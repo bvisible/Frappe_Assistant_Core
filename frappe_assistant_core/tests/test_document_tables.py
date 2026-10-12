@@ -209,6 +209,10 @@ class TestCreateDocumentReportsWhatIsReallyMissing(BaseAssistantTest):
         registry = get_tool_registry()
         if not registry.has_tool("create_document"):
             self.skipTest("create_document tool not available")
+        # Price List is an ERPNext DocType: the CI bench of this app has Frappe only, where the tool answers
+        # "Module import failed for Price List" (red from 10 October).
+        if not frappe.db.exists("DocType", "Price List"):
+            self.skipTest("Price List is an ERPNext DocType and this bench has Frappe only")
 
         result = registry.execute_tool("create_document", {"doctype": "Price List", "data": {"selling": 1}})
 
