@@ -57,7 +57,7 @@ dependencies = [
     # Advanced file processing
     "pymupdf>=1.23.0",
     "python-magic>=0.4.27",
-    "beautifulsoup4~=4.12.2",  # Compatible with frappe ~=4.12.2 requirement
+    "beautifulsoup4>=4.12.2,<5",  # //// Neoffice — was ~=4.12.2 to match frappe; suite needs >=4.13.5 (maintenance#1679)
 ]
 
 [project.optional-dependencies]
