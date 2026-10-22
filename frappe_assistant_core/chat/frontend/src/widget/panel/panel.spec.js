@@ -38,6 +38,7 @@ import { useModelStore } from "@/stores/modelStore";
 import { useSpotlightStore } from "@/stores/spotlightStore";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { configureSurface, resetSurface } from "@/stores/chat/surface";
+import { configureWidgetSurface } from "./widgetSurface.js";
 import { DAILY_KEY, localDate } from "@/components/spotlight/spotlightRules";
 
 // A panel left mounted keeps its document-level listeners alive into the next test.
@@ -662,6 +663,47 @@ describe("panel bootstrap", () => {
 		expect(useModelStore().models).toHaveLength(1);
 		expect(useModelStore().currentModelId).toBe("auto");
 		expect(localStorage.getItem("faco_selected_model")).toBe("gpt-saved");
+	});
+
+	it("sends no explicit model until the catalogue has loaded, so the server's saved model decides", async () => {
+		// A fresh browser: no localStorage, and getAvailable has not answered when the first message is sent.
+		api.models.getAvailable.mockReturnValue(new Promise(() => {}));
+		mount(PanelApp, { global: { stubs: gateless } });
+		await flushPromises();
+		expect(useModelStore().currentModelId).toBeNull();
+	});
+
+	it("passes no model to the server on a first turn sent before the catalogue loads", async () => {
+		// mountPanel configures the surface the same way, and PanelApp pins before loading models.
+		configureWidgetSurface();
+		api.models.getAvailable.mockReturnValue(new Promise(() => {}));
+		api.chat.send.mockClear();
+		const app = mount(PanelApp, { global: { stubs: { ...gateless, WidgetPanel: false, ChatInterface: true, InputArea: SendStub, CreditMeter: true, NotificationHost: true } } });
+		onTestFinished(() => app.unmount());
+		await flushPromises();
+		await app.findComponent(SendStub).vm.$emit("send", { message: "hello" });
+		await flushPromises();
+		expect(api.chat.send).toHaveBeenCalled();
+		expect(api.chat.send.mock.calls[0][4] ?? null).toBeNull();
+	});
+
+	it("follows the saved model once the catalogue has loaded", async () => {
+		api.models.getAvailable.mockResolvedValue({
+			models: [{ model_id: "gpt-saved", tier: "Standard", tier_rank: 1 }],
+			selected_model: "gpt-saved",
+			max_tier_rank: 3,
+			auto_mode: { enabled: true },
+		});
+		mount(PanelApp, { global: { stubs: gateless } });
+		await flushPromises();
+		expect(useModelStore().currentModelId).toBe("gpt-saved");
+	});
+
+	it("routes automatically once loaded when nothing is saved", async () => {
+		api.models.getAvailable.mockResolvedValue({ models: [], max_tier_rank: 3, auto_mode: { enabled: true } });
+		mount(PanelApp, { global: { stubs: gateless } });
+		await flushPromises();
+		expect(useModelStore().currentModelId).toBe("auto");
 	});
 
 	it("does not clear FAC Chat's saved model when it has been retired", async () => {
