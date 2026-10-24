@@ -615,7 +615,10 @@ class TestSubmitDocumentAlias(DocumentActionTestCase):
         names = [tool["name"] for tool in tools]
 
         self.assertIn("document_action", names)
-        self.assertNotIn("submit_document", names)
+        # //// Neoffice — upstream hides the old name from tools/list (a temporary alias for calls only). The hub's MCP
+        # //// clients take their tool list from tools/list, so we keep it listed (plugins/core/plugin.py): calls still
+        # //// reach document_action through the alias (the tests above).
+        self.assertIn("submit_document", names)
 
     def test_alias_target_asks_for_approval_and_is_destructive(self):
         """Callers (AR, MCP clients) decide approval from the tool's name and annotations."""
