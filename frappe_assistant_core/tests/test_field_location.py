@@ -274,7 +274,8 @@ class TestCustomFieldLocationInResults(BaseAssistantTest):
 
     def test_endpoint_is_get_only(self):
         self.assertIn(get_field_placement, frappe.whitelisted)
-        self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[get_field_placement], ["GET"])
+        # //// Neoffice — Frappe v15 stores the allowed methods as a tuple, v16 as a list; compare as a list.
+        self.assertEqual(list(frappe.allowed_http_methods_for_whitelisted_func[get_field_placement]), ["GET"])
 
     def test_endpoint_refused_without_read_permission(self):
         email = "field-placement-outsider@example.com"

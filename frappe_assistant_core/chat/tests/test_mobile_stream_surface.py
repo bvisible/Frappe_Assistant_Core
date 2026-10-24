@@ -61,4 +61,5 @@ class TestMobileStreamSurface(unittest.TestCase):
             with self.subTest(name=name):
                 endpoint = getattr(mobile_stream, name)
                 self.assertIn(endpoint, frappe.whitelisted)
-                self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[endpoint], ["GET"])
+                # //// Neoffice — Frappe v15 stores the allowed methods as a tuple, v16 as a list; compare as a list.
+                self.assertEqual(list(frappe.allowed_http_methods_for_whitelisted_func[endpoint]), ["GET"])

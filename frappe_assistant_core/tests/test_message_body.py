@@ -4,6 +4,8 @@
 
 """Message bodies are sent the way the approval card shows them."""
 
+# //// Neoffice — unittest: for the skip below.
+import unittest
 from unittest.mock import patch
 
 import frappe
@@ -29,6 +31,9 @@ class TestMessageBody(BaseAssistantTest):
         # Helpdesk sends with as_markdown=True; Frappe markdowns any body not starting with "<".
         self.assertNotIn("<em>", frappe.utils.md_to_html(as_html_body("Ships *Friday*\nThanks")))
 
+    # //// Neoffice — this asserts upstream's send_email (queues at once, for the approval card). Ours is a draft, then
+    # //// confirm_send_email, with another contract (plugins/core/tools/send_email.py): not applicable here.
+    @unittest.skip("Neoffice keeps its own draft-then-confirm send_email")
     def test_send_email_sends_plain_text_as_the_card_shows_it(self):
         from frappe_assistant_core.plugins.core.tools.send_email import SendEmail
 

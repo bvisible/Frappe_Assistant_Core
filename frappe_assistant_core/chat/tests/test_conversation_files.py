@@ -248,7 +248,15 @@ class TestTheSameFileInTwoConversations(ConversationFilesTestCase):
 class TestFilesWithoutText(ConversationFilesTestCase):
     def _photo(self):
         msg = FACChatMessage.create_message(session_id=self.session, role="user", content="What is this?")
-        png = b"\x89PNG\r\n\x1a\n" + frappe.generate_hash(length=32).encode()
+        # //// Neoffice — a real image (Pillow refuses a header followed by junk), unique bytes per call.
+        import io
+        import os
+
+        from PIL import Image
+
+        _out = io.BytesIO()
+        Image.new("RGB", (2, 2), tuple(os.urandom(3))).save(_out, format="PNG")
+        png = _out.getvalue()
         self.file = self._upload("photo.png", png, content_type="image/png")
         _attach_files_to_message([self.file["file_url"]], msg.name)
 

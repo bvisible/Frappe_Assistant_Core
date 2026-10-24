@@ -121,7 +121,9 @@ class FacRegisterWithArReconnectTests(RegisterWithArTestCase):
         ), patch("frappe_assistant_core.chat.quota_cache.update_from_ar"):
             mock_session.user = "Administrator"
 
-            result = register_with_ar(owner_email=None, terms_version="v1")
+            # //// Neoffice — Frappe v15 type-checks the arguments before the function runs and refuses None; call the
+            # //// function itself, as the test means to (v16 passes None through).
+            result = getattr(register_with_ar, "__wrapped__", register_with_ar)(owner_email=None, terms_version="v1")
 
         # The null-email rejection must NOT have fired.
         self.assertNotEqual(result.get("error"), self.REJECTION)
@@ -144,7 +146,9 @@ class FacRegisterWithArReconnectTests(RegisterWithArTestCase):
         ):
             mock_session.user = "Administrator"
 
-            result = register_with_ar(owner_email=None, terms_version="v1")
+            # //// Neoffice — Frappe v15 type-checks the arguments before the function runs and refuses None; call the
+            # //// function itself, as the test means to (v16 passes None through).
+            result = getattr(register_with_ar, "__wrapped__", register_with_ar)(owner_email=None, terms_version="v1")
 
         self.assertFalse(result.get("success"))
         self.assertEqual(result.get("error"), self.REJECTION)

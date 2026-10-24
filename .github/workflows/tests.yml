@@ -25,6 +25,8 @@ jobs:
     uses: bvisible/neoffice-ci/.github/workflows/frappe-app-ci.yml@main
     with:
       app: frappe_assistant_core
+      # The suite asserts against Customer, Sales Invoice, Quotation…: the hub runs ERPNext and so does the bench.
+      install_apps: "erpnext"
       test_args: ${{ inputs.test_args || '' }}
     # inherit: CI_REPORT_SECRET (deps are public forks: no read token needed)
     secrets: inherit

@@ -22,7 +22,8 @@ class TestContinueResponseValidation(unittest.TestCase):
 
         from frappe_assistant_core.chat.api.chat.messages import continue_response
 
-        with self.assertRaises(frappe.ValidationError):
+        # //// Neoffice — Frappe v15 rejects the None argument with FrappeTypeError before the function runs (v16: ValidationError).
+        with self.assertRaises((frappe.ValidationError, frappe.exceptions.FrappeTypeError)):
             continue_response(session_id="SESSION-1", message_id=None)
 
     def test_blank_message_id_throws(self):

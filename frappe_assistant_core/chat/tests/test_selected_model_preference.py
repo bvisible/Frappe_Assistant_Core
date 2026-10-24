@@ -29,8 +29,9 @@ class TestSetSelectedModelEndpoint(unittest.TestCase):
 
     def test_it_is_post_only(self):
         self.assertIn(models.set_selected_model, frappe.whitelisted)
+        # //// Neoffice — Frappe v15 stores the allowed methods as a tuple, v16 as a list; compare as a list.
         self.assertEqual(
-            frappe.allowed_http_methods_for_whitelisted_func[models.set_selected_model], ["POST"]
+            list(frappe.allowed_http_methods_for_whitelisted_func[models.set_selected_model]), ["POST"]
         )
 
     def test_a_get_request_is_refused(self):

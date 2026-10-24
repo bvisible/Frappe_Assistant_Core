@@ -18,7 +18,22 @@ from frappe_assistant_core.chat.api.chat.helpers import _attach_files_to_message
 from frappe_assistant_core.chat.api.settings.uploads import upload_message_file
 from frappe_assistant_core.tests.base_test import BaseAssistantTest
 
-PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64).decode()
+
+
+# //// Neoffice — a real image: Frappe's upload path now opens the file with Pillow, which refuses a header followed by
+# //// zeros ("Truncated File Read"). Unique bytes per call, because Frappe content-addresses uploads.
+def _png_bytes():
+    import io
+    import os
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (2, 2), tuple(os.urandom(3))).save(out, format="PNG")
+    return out.getvalue()
+
+
+PNG = base64.b64encode(_png_bytes()).decode()
 
 
 class TestUploadMarksPending(BaseAssistantTest):
@@ -57,7 +72,8 @@ class TestAttachFilesToMessage(BaseAssistantTest):
             {
                 "doctype": "File",
                 "file_name": file_name,
-                "content": b"\x89PNG\r\n\x1a\n" + frappe.generate_hash(length=32).encode(),
+                # //// Neoffice — a real image, see _png_bytes above.
+                "content": _png_bytes(),
                 "is_private": 1,
                 "folder": "Home/Attachments",
                 "fac_pending_chat_attachment": 1,

@@ -61,9 +61,12 @@ class TestSearchToolRegistration(BaseAssistantTest):
 
     def test_merged_away_tools_are_gone(self):
         """search_doctype and search_link are now modes of search_documents."""
+        # //// Neoffice — upstream folded these two into search_documents and asserts they are gone; the hub's MCP
+        # //// clients still call them by name, so we keep them listed beside search_documents (plugin.py).
         tool_names = [tool["name"] for tool in self.registry.get_available_tools()]
-        self.assertNotIn("search_doctype", tool_names)
-        self.assertNotIn("search_link", tool_names)
+        self.assertIn("search_documents", tool_names)
+        self.assertIn("search_doctype", tool_names)
+        self.assertIn("search_link", tool_names)
 
     def test_schema_exposes_the_routing_arguments(self):
         properties = SearchDocuments().inputSchema["properties"]
