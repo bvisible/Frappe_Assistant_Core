@@ -1,3 +1,5 @@
+# //// Neoffice — added file (no upstream equivalent).
+# //// Middle step of our draft-then-confirm e-mail flow: edits the Communication draft that send_email created.
 """
 Modify Email Draft Tool for Core Plugin.
 Modifies an existing email draft (Communication) without sending it.

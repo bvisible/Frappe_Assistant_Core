@@ -1,0 +1,153 @@
+# How to Use generate_report (with report_list and report_requirements)
+
+## Overview
+
+Frappe/ERPNext includes hundreds of built-in business reports. Three tools work together for report execution:
+
+1. **`report_list`** — discover available reports by module
+2. **`report_requirements`** — get mandatory filters and valid options for a specific report
+3. **`generate_report`** — execute the report with filters
+
+**Always follow this workflow: list → requirements → generate.**
+
+## report_list Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | No | What the user wants to know, in their words (`"receivables overdue"`). Ranks the reports the user can run; start here |
+| `limit` | integer | No | Reports to return for a `query`. Default 10, maximum 25 |
+| `module` | string | No | Filter by module: `"Accounts"`, `"Selling"`, `"Stock"`, `"HR"`, `"CRM"` |
+| `report_type` | string | No | `"Script Report"`, `"Query Report"`, or `"Report Builder"` |
+
+With `query`, returns `{ count, reports: [{ name, report_type, module, origin, ref_doctype, prepared, mandatory_filters, purpose }], hint }`, best match first. A report built in the UI (`origin: "custom"`) ranks above an equal standard report. Report Builder views are saved list views, not runnable reports: they are never returned (use `list_documents` for them). `mandatory_filters` names the filters you must pass; `[]` means the report declares none, and `null` means FAC could not tell, so call `report_requirements` before assuming there are none. `prepared` means the report runs in the background. When nothing matches, `hint` points to `get_doctype_info(topic=...)`.
+
+With `module` or `report_type` and no `query`, returns `{ reports: [{ name, report_name, report_type, module, is_standard, disabled }], count }`.
+
+With no arguments, returns only `{ modules: { <module>: <report count> } }`, not every report.
+
+Only reports the current user can run are listed: enabled, permitted by the report's roles, and with `report` permission on the report's reference DocType.
+
+### Finding a report for a question
+
+1. Call `report_list` with `query` set to the user's question. Prefer a custom report, then a standard one.
+2. Call `report_requirements` for the chosen report, then `generate_report`.
+3. If no report fits, call `get_doctype_info(topic=...)` to find the DocType, then `list_documents` with grouping.
+4. Name the report and the filters you used in the answer.
+
+## report_requirements Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `report_name` | string | **Yes** | — | Exact report name |
+| `include_filters` | boolean | No | `true` | Include filter requirements |
+| `include_columns` | boolean | No | `true` | Include column structure |
+| `include_metadata` | boolean | No | `false` | Include technical metadata |
+
+Returns filter definitions with field types, required flags, and valid options.
+
+### Filter values are per-report, never per-fieldname
+
+`generate_report` validates your filters against **the definitions this report declares** — the same ones `report_requirements` returns. Two reports can give the same filter name completely different meanings, so never carry a value over from one report to another.
+
+`range` is the clearest example:
+
+| Report | `range` fieldtype | Accepted values |
+|--------|-------------------|-----------------|
+| Accounts Receivable / Payable (+ Summary) | `Data` | ageing buckets, e.g. `"30, 60, 90, 120"` |
+| Stock Ageing | `Data` | ageing buckets, e.g. `"30, 60, 90"` |
+| Sales Analytics, Stock Analytics | `Select` | `Weekly`, `Monthly`, `Quarterly`, `Half-Yearly`, `Yearly` |
+| Website Analytics | `Select` | `Daily`, `Weekly`, `Monthly` |
+| Sales Pipeline Analytics | `Select` | `Monthly`, `Quarterly` |
+
+For a value-constrained filter (`Select`, `Autocomplete`), `options` is always an explicit list of the accepted values — use one of them verbatim. For a `Link` filter, `options` is the target DocType and the value must be an existing record name.
+
+A `MultiSelectList` filter (such as `party` or `customer_group` on Accounts Receivable) takes an array of record names: `"party": ["Blue Harbor Cafe"]`. A single name is accepted and sent as a one-item array.
+
+**Every advertised `default` is guaranteed executable.** Passing the defaults `report_requirements` returns will never be rejected as an invalid value, and omitting a filter applies that same default.
+
+When a value is rejected, `validation_errors` names the accepted values and `error_details` carries them as structured data:
+
+```json
+{
+  "success": false,
+  "validation_errors": ["Invalid range: 'Weekly'. Must be one of: Monthly, Quarterly"],
+  "error_details": [
+    {
+      "fieldname": "range",
+      "type": "invalid_option",
+      "value": "Weekly",
+      "accepted_values": ["Monthly", "Quarterly"]
+    }
+  ]
+}
+```
+
+`type` is one of `invalid_option`, `unknown_record` (a Link value with no such record — `suggestions` offers candidates), or `invalid_date`.
+
+## generate_report Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `report_name` | string | **Yes** | — | Exact report name |
+| `filters` | object | No | `{}` | Filter key-value pairs |
+| `format` | string | No | `"json"` | `"json"`, `"csv"`, or `"excel"` |
+| `max_rows` | integer | No | `500` | Most rows to return (1 to 5000). Values above 5000 are clamped |
+| `summary_only` | boolean | No | `false` | Return columns, `row_count` and only the totals row, or `report_summary` with no rows; a report with neither returns its rows with `summary_unavailable: true` |
+
+**Row-limit response fields:** `row_count` (rows the report produced), `truncated` (`true` when rows were left out),
+`total_count` (same as `row_count`, present when rows are returned), `summary_only`, `report_summary` (when the report returns one), and `truncation_note` (when truncated). `row_count` includes the totals row. A report with
+a totals row always keeps it as the last returned row (with `max_rows: 1` that row is all you get). Tree reports are cut by
+plain slicing, so a child can lose its parent. Use `summary_only` to size a large report, then raise
+`max_rows` or narrow the filters. The `run_python_code` sandbox's `tools.generate_report` asks for the 5000 cap.
+
+## Best Practices
+
+1. **Always call `report_requirements` first** — missing mandatory filters often cause empty results or errors. The tool auto-defaults dates and company, but these defaults may not match what you need.
+2. **Use exact values for Link filters** — company names, customer names, etc. must match exactly what's in the database.
+3. **Take Select values from that report's own `options`** — the same filter name can accept different values in a different report.
+4. **Use `report_list` to find reports** — don't guess report names. Common modules: Accounts, Selling, Buying, Stock, HR.
+5. **Script Reports are most powerful** — they have custom business logic. Query Reports are simpler SQL-based reports.
+6. **Use `format: "csv"` or `"excel"` for exports** — returns downloadable file links.
+
+## Common Workflow
+
+### Step 1: Find reports
+```json
+{ "module": "Accounts" }
+```
+
+### Step 2: Check requirements
+```json
+{ "report_name": "Accounts Receivable Summary" }
+```
+
+### Step 3: Execute with proper filters
+```json
+{
+  "report_name": "Accounts Receivable Summary",
+  "filters": {
+    "company": "My Company Ltd",
+    "report_date": "2024-12-31"
+  }
+}
+```
+
+## Common Reports by Module
+
+| Module | Reports |
+|--------|---------|
+| Accounts | P&L Statement, Balance Sheet, Accounts Receivable Summary, General Ledger, Trial Balance |
+| Selling | Sales Analytics, Sales Order Analysis, Customer Acquisition and Loyalty, Territory-wise Sales |
+| Stock | Stock Balance, Stock Ledger, Stock Ageing, Warehouse-wise Stock Balance |
+| HR | Employee Information, Attendance, Monthly Attendance Sheet |
+
+## Edge Cases
+
+- **Empty results** — usually means filters are wrong. Check `report_requirements` for correct filter names and valid values.
+- **Date filters** — use `YYYY-MM-DD` format.
+- **Company filter** — most reports require a company. Get exact company name from `list_documents` with `doctype: "Company"`.
+- **Report Builder reports are NOT supported** — only Script Reports and Query Reports work.
+- **Large reports** — the tool waits at most 15 seconds for a prepared report. A slow one returns `status: "timeout"` with a `prepared_report_name`: the report is still being prepared, not empty. Call `generate_report` again with the same filters in a minute or two and the retry picks up that same report instead of starting a new one.
+- **Defaulted filters** — every result carries `defaulted_filters`, the filters FAC filled in because they were omitted or blank (for example `from_date`, `to_date`, `company`). Only filters the report itself declares are listed: a report with no date filter ignores dates, so none is reported for it. It is `{}` when you passed everything, and `null` when FAC could not determine the report's filters (do not cite a period or company then). State the period and company actually used in your answer; if a required choice is ambiguous, ask the user rather than relying on a default. Use `summary_only` for totals questions.
+- **A report that fails** returns `success: false` and the `error` text (a Script Report adds a `suggestion`). It is a failure, not an empty result: read `error`, fix the filters it points at, and ask again.
+- **A prepared report that fails** returns `success: false`, `status: "error"`, the `error` text and the `prepared_report_name`. It is a failure, not an empty result: read `error`, fix the filters it points at, and ask again.

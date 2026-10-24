@@ -20,24 +20,73 @@ Provides common setup and utilities for all test classes
 """
 
 import json
-import unittest
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import frappe
 
+# Frappe v16 moved IntegrationTestCase into frappe.tests.classes; on v15 the
+# same class-level transaction + rollback contract is FrappeTestCase in
+# frappe.tests.utils, and frappe.tests.classes does not exist at all. Importing
+# only the v16 path makes the whole FAC suite unimportable on v15, which is why
+# `Server (version-15)` could not collect a single test.
+try:
+    from frappe.tests.classes.integration_test_case import IntegrationTestCase
+except ImportError:  # Frappe v15
+    from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
-class BaseAssistantTest(unittest.TestCase):
+
+class BaseAssistantTest(IntegrationTestCase):
     """Base test class with common setup and utilities"""
+
+    SHOW_TRANSACTION_COMMIT_WARNINGS = True
 
     @classmethod
     def setUpClass(cls):
-        """Set up class-level test environment"""
+        """Set up class-level test environment.
+
+        Extends IntegrationTestCase's class-level transaction setup. The
+        monkey-patched commit() runs INSIDE the IntegrationTestCase
+        transaction, so any production code that calls frappe.db.commit()
+        during a test silently no-ops and gets rolled back at class teardown.
+        """
+        super().setUpClass()
+
         # Ensure we're in test mode
         frappe.flags.in_test = True
 
         # Set default user
         if not hasattr(frappe, "session") or not frappe.session.user:
+            # nosemgrep: frappe-setuser — test bootstrap; tests run in isolated transaction
             frappe.set_user("Administrator")
+
+        cls._block_commits()
+
+    @classmethod
+    def _block_commits(cls):
+        """Replace frappe.db.commit with a no-op for the duration of the test class.
+
+        Production code (API endpoints, scheduler jobs, doc lifecycle hooks)
+        legitimately calls frappe.db.commit(). When that code runs inside a
+        test, the commit permanently writes test data to the dev database,
+        defeating IntegrationTestCase's automatic rollback.
+
+        This method monkey-patches commit() to a no-op and registers cleanup
+        via addClassCleanup (LIFO) to restore it. Because _block_commits
+        runs AFTER super().setUpClass() (which registers _rollback_db), the
+        restore fires BEFORE _rollback_db — so the real commit is back in
+        place when the final rollback runs.
+        """
+        original_commit = frappe.db.__class__.commit
+
+        # Takes any arguments: Frappe itself calls commit(chain=True), for
+        # example in frappe.sessions.delete_session.
+        @staticmethod
+        def _noop_commit(*args, **kwargs):
+            pass
+
+        frappe.db.__class__.commit = _noop_commit
+        cls.addClassCleanup(setattr, frappe.db.__class__, "commit", original_commit)
 
     def setUp(self):
         """Set up test environment for each test"""
@@ -46,6 +95,7 @@ class BaseAssistantTest(unittest.TestCase):
 
         # Set test user
         self.test_user = "Administrator"
+        # nosemgrep: frappe-setuser — test bootstrap; tests run in isolated transaction
         frappe.set_user(self.test_user)
 
         # Ensure plugins are enabled for testing
@@ -53,38 +103,79 @@ class BaseAssistantTest(unittest.TestCase):
 
     def execute_tool_and_get_result(self, registry, tool_name, arguments):
         """
-        Execute a tool via registry and return the result.
+        Execute a tool via registry and return unwrapped result.
 
-        Tools return their data directly with 'success' and other keys.
-        The registry passes through the tool result as-is.
+        The registry wraps tool results in a 'result' key, this helper
+        extracts the actual tool result for easier testing.
         """
         registry_result = registry.execute_tool(tool_name, arguments)
 
-        # Return the tool result directly (it includes 'success' and other data keys)
-        return registry_result
+        # Registry execution should always succeed (unless tool not found)
+        self.assertTrue(
+            registry_result.get("success"), f"Registry execution failed: {registry_result.get('error')}"
+        )
+
+        # Return the actual tool result
+        return registry_result.get("result", {})
 
     def execute_tool_expect_failure(self, registry, tool_name, arguments, expected_error_text=None):
         """
         Execute a tool via registry expecting tool-level failure.
         Returns the tool result for further assertions.
+
+        Works for both failure modes:
+        - Tool raised an exception — registry wrapper has success=False and
+          error_type set; no inner "result" dict.
+        - Tool returned {"success": False, ...} — registry wrapper now also
+          has success=False (since the audit-log accuracy fix) with
+          error_type="ToolReportedError" and the tool's dict under "result".
         """
         registry_result = registry.execute_tool(tool_name, arguments)
 
-        # Verify the tool failed
         self.assertFalse(
-            registry_result.get("success"), f"Tool execution should have failed but succeeded: {registry_result}"
+            registry_result.get("success"),
+            f"Tool execution should have failed but succeeded: {registry_result}",
         )
 
-        # Check error message if provided
-        if expected_error_text:
-            self.assertIn(expected_error_text, registry_result.get("error", ""))
+        # Prefer the inner tool dict when present (ToolReportedError path);
+        # fall back to the wrapper itself for exception-raising tools.
+        tool_result = registry_result.get("result") or registry_result
 
-        return registry_result
+        if expected_error_text:
+            error_text = tool_result.get("error") or registry_result.get("error") or ""
+            self.assertIn(expected_error_text, error_text)
+
+        return tool_result
 
     def tearDown(self):
-        """Clean up after each test"""
+        """Clean up after each test."""
         self.clear_test_data()
         self.cleanup_mocks()
+
+    @contextmanager
+    def enforce_only_for_checks(self):
+        """Run code with Frappe's test-mode permission shortcut disabled."""
+        sentinel = object()
+        flags = getattr(frappe.local, "flags", None)
+        created_flags = flags is None
+
+        if created_flags:
+            frappe.local.flags = frappe._dict()
+            flags = frappe.local.flags
+
+        original_in_test = getattr(flags, "in_test", sentinel)
+        flags.in_test = False
+
+        try:
+            yield
+        finally:
+            if original_in_test is sentinel:
+                flags.pop("in_test", None)
+            else:
+                flags.in_test = original_in_test
+
+            if created_flags and not flags:
+                del frappe.local.flags
 
     def _ensure_plugins_enabled(self):
         """Ensure core plugins are enabled for testing"""
@@ -99,22 +190,16 @@ class BaseAssistantTest(unittest.TestCase):
                     enabled_plugins.append("core")
                     settings.enabled_plugins_list = json.dumps(enabled_plugins)
                     settings.save(ignore_permissions=True)
-                    frappe.db.commit()
             else:
                 # Create settings with core plugin enabled
                 doc = frappe.get_doc(
                     {
                         "doctype": "Assistant Core Settings",
                         "server_enabled": 0,
-                        "enforce_artifact_streaming": 1,
-                        "response_limit_prevention": 1,
-                        "streaming_line_threshold": 5,
-                        "streaming_char_threshold": 1000,
                         "enabled_plugins_list": json.dumps(["core"]),
                     }
                 )
                 doc.insert(ignore_permissions=True)
-                frappe.db.commit()
 
             # Force plugin manager refresh to load enabled plugins
             from frappe_assistant_core.utils.plugin_manager import get_plugin_manager
@@ -134,9 +219,7 @@ class BaseAssistantTest(unittest.TestCase):
 
             for doctype in test_doctypes:
                 if frappe.db.exists("DocType", doctype):
-                    frappe.db.sql(f"DELETE FROM `tab{doctype}` WHERE name LIKE 'TEST_%'")
-
-            frappe.db.commit()
+                    frappe.db.delete(doctype, {"name": ("like", "TEST_%")})
         except Exception:
             # Ignore cleanup errors in tests
             pass
@@ -181,6 +264,26 @@ class BaseAssistantTest(unittest.TestCase):
 
         user_doc.insert(ignore_permissions=True)
         return user_doc
+
+    def make_throwaway_user(self, prefix: str, roles: tuple = ()) -> str:
+        """A fresh enabled user with a unique email and only ``roles``.
+
+        For tests that must act as someone other than Administrator. The row
+        is rolled back with the test transaction. With no ``roles`` it is a
+        Website User; pass roles explicitly for role-gated endpoints.
+        """
+        email = f"{prefix}-{frappe.generate_hash(length=8)}@example.com"
+        frappe.get_doc(
+            {
+                "doctype": "User",
+                "email": email,
+                "first_name": prefix,
+                "enabled": 1,
+                "send_welcome_email": 0,
+                "roles": [{"role": role} for role in roles],
+            }
+        ).insert(ignore_permissions=True)
+        return email
 
     def create_test_document(self, doctype, data):
         """Create a test document"""

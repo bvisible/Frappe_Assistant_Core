@@ -5,629 +5,497 @@ frappe.pages['fac-admin'].on_page_load = function(wrapper) {
         single_column: true
     });
 
-    // Add custom styles matching Frappe theme
-    const styles = `
-        <style>
-            .fac-admin-container {
-                max-width: 1400px;
-                margin: 0 auto;
-            }
-            .fac-card {
-                background: var(--card-bg);
-                border-radius: var(--border-radius-md);
-                padding: 20px;
-                margin-bottom: 20px;
-                box-shadow: var(--shadow-sm);
-                border: 1px solid var(--border-color);
-            }
-            .fac-card-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 20px;
-                padding-bottom: 12px;
-                border-bottom: 1px solid var(--border-color);
-            }
-            .fac-card-title {
-                font-size: 16px;
-                font-weight: 600;
-                color: var(--heading-color);
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-            .fac-status-indicator {
-                width: 10px;
-                height: 10px;
-                border-radius: 50%;
-                display: inline-block;
-            }
-            .fac-status-indicator.active {
-                background: var(--green-500);
-                box-shadow: 0 0 0 3px var(--green-100);
-            }
-            .fac-status-indicator.inactive {
-                background: var(--red-500);
-                box-shadow: 0 0 0 3px var(--red-100);
-            }
-            .fac-stats-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 20px;
-                margin-bottom: 20px;
-            }
-            .fac-stat-card {
-                background: var(--card-bg);
-                border-radius: var(--border-radius-md);
-                padding: 20px;
-                border-left: 4px solid var(--primary);
-                box-shadow: var(--shadow-sm);
-            }
-            .fac-stat-card h3 {
-                margin: 0 0 12px 0;
-                font-size: 13px;
-                font-weight: 500;
-                color: var(--text-muted);
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            }
-            .fac-stat-value {
-                font-size: 32px;
-                font-weight: 600;
-                color: var(--heading-color);
-                margin-bottom: 8px;
-            }
-            .fac-stat-label {
-                font-size: 13px;
-                color: var(--text-muted);
-            }
-            .fac-tool-item {
-                padding: 12px 16px;
-                border-bottom: 1px solid var(--border-color);
-                transition: background 0.15s;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            .fac-tool-item:hover {
-                background: var(--bg-color);
-            }
-            .fac-tool-item:last-child {
-                border-bottom: none;
-            }
-            .fac-tool-info {
-                flex: 1;
-            }
-            .fac-tool-name {
-                font-weight: 600;
-                color: var(--heading-color);
-                margin-bottom: 4px;
-                font-size: 14px;
-            }
-            .fac-tool-meta {
-                display: flex;
-                gap: 12px;
-                align-items: center;
-                font-size: 12px;
-            }
-            .fac-tool-badge {
-                display: inline-block;
-                padding: 3px 10px;
-                background: var(--bg-color);
-                border-radius: 12px;
-                font-size: 11px;
-                color: var(--text-muted);
-                font-weight: 500;
-                border: 1px solid var(--border-color);
-            }
-            .fac-tool-toggle {
-                margin: 0;
-            }
-            .fac-plugin-item {
-                padding: 16px;
-                border-bottom: 1px solid var(--border-color);
-                transition: background 0.15s;
-            }
-            .fac-plugin-item:hover {
-                background: var(--bg-color);
-            }
-            .fac-plugin-item:last-child {
-                border-bottom: none;
-            }
-            .fac-plugin-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            .fac-plugin-name {
-                font-weight: 600;
-                color: var(--heading-color);
-                font-size: 14px;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-            .fac-plugin-name i {
-                color: var(--primary);
-            }
-            /* Toggle Switch */
-            .switch {
-                position: relative;
-                display: inline-block;
-                width: 44px;
-                height: 24px;
-            }
-            .switch input {
-                opacity: 0;
-                width: 0;
-                height: 0;
-            }
-            .slider {
-                position: absolute;
-                cursor: pointer;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background-color: var(--gray-400);
-                transition: .3s;
-                border: 1px solid var(--border-color);
-            }
-            .slider:before {
-                position: absolute;
-                content: "";
-                height: 18px;
-                width: 18px;
-                left: 3px;
-                bottom: 3px;
-                background-color: var(--card-bg);
-                transition: .3s;
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-            }
-            input:checked + .slider {
-                background-color: var(--primary);
-            }
-            input:checked + .slider:before {
-                transform: translateX(20px);
-            }
-            .slider.round {
-                border-radius: 24px;
-            }
-            .slider.round:before {
-                border-radius: 50%;
-            }
-            .fac-settings-group {
-                margin-bottom: 24px;
-            }
-            .fac-settings-label {
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--heading-color);
-                margin-bottom: 8px;
-                display: block;
-            }
-            .fac-settings-value {
-                font-size: 13px;
-                color: var(--text-color);
-                padding: 10px 12px;
-                background: var(--control-bg);
-                border-radius: var(--border-radius);
-                border: 1px solid var(--border-color);
-            }
-            .fac-endpoint-url {
-                font-family: var(--font-stack-monospace);
-                font-size: 12px;
-                word-break: break-all;
-            }
-            .fac-table {
-                width: 100%;
-                border-collapse: collapse;
-            }
-            .fac-table thead {
-                background: var(--bg-color);
-            }
-            .fac-table th {
-                padding: 10px 12px;
-                text-align: left;
-                font-size: 12px;
-                font-weight: 600;
-                color: var(--text-muted);
-                border-bottom: 1px solid var(--border-color);
-            }
-            .fac-table td {
-                padding: 10px 12px;
-                font-size: 13px;
-                color: var(--text-color);
-                border-bottom: 1px solid var(--border-color);
-            }
-            .fac-table tbody tr:hover {
-                background: var(--bg-color);
-            }
-            /* Ensure checked toggle slider knob is visible in dark mode */
-            input:checked + .slider:before {
-                background-color: white;
-            }
-        </style>
-    `;
+    // Initialize shared namespace before loading submodules
+    frappe.fac_admin = {
+        page: page,
+        state: {
+            toggleInProgress: {},
+            refreshInProgress: false,
+            autoRefreshEnabled: true,
+            viewMode: 'plugins',
+            activeTab: 'tools',
+            availableRoles: [],
+            openConfigPanels: {},
+            promptsData: [],
+            skillsData: [],
+        },
+    };
 
-    page.main.html(styles + `
-        <div class="fac-admin-container">
-            <!-- Server Status Card -->
-            <div class="fac-card">
-                <div class="fac-card-header">
-                    <div class="fac-card-title">
+    const ns = frappe.fac_admin;
+
+    // Load CSS, then utils (the markup below calls ns.icon), inject HTML, then the rest
+    frappe.require("/assets/frappe_assistant_core/css/fac_admin.css");
+
+    frappe.require("/assets/frappe_assistant_core/js/fac_admin_utils.js").then(function() {
+        page.main.html(`
+            <div class="fac-admin-container">
+
+                <!-- Page header strip: server status + refresh ticker -->
+                <div class="fac-page-header">
+                    <div class="fac-page-title">
                         <span id="server-status-icon" class="fac-status-indicator"></span>
-                        <span id="server-status-text">Frappe Assistant Core</span>
+                        <span id="server-status-text">FAC</span>
+                        <span id="server-status-pill" class="fac-status-pill" role="status" aria-live="polite"></span>
                     </div>
-                    <div>
+                    <div class="fac-page-actions">
+                        <span id="fac-last-refreshed" class="fac-last-refreshed" aria-live="polite"></span>
+                        <button class="btn btn-sm btn-default" id="refresh-all" aria-label="Refresh dashboard">
+                            ${ns.icon('refresh-cw')}
+                        </button>
                         <button class="btn btn-sm btn-primary" id="toggle-server">
                             <span id="toggle-server-text">Loading...</span>
                         </button>
-                        <button class="btn btn-sm btn-default" id="open-settings">
-                            <i class="fa fa-cog"></i> Settings
-                        </button>
                     </div>
                 </div>
 
-                <!-- Quick Settings -->
-                <div class="row">
-                    <div class="col-md-12">
-                        <div class="fac-settings-group">
-                            <label class="fac-settings-label">MCP Endpoint</label>
-                            <div class="fac-settings-value fac-endpoint-url" id="fac-mcp-endpoint">
-                                Loading...
+                <!-- Two-column body: left = registry, right = sidebar -->
+                <div class="fac-two-col">
+
+                    <!-- LEFT: registry card with tabs (counts in pills) -->
+                    <div class="fac-card fac-registry-card">
+
+                        <!-- Top-Level Tab Navigation -->
+                        <div class="fac-top-tabs" role="tablist" aria-label="FAC Admin sections">
+                            <button class="fac-top-tab active" data-tab="tools" role="tab" id="tab-tools" aria-selected="true" aria-controls="tab-panel-tools" tabindex="0">
+                                ${ns.icon('wrench')}
+                                Tools
+                                <span class="fac-tab-count" id="tab-count-tools" aria-hidden="true">–</span>
+                            </button>
+                            <button class="fac-top-tab" data-tab="prompts" role="tab" id="tab-prompts" aria-selected="false" aria-controls="tab-panel-prompts" tabindex="-1">
+                                ${ns.icon('file-text')}
+                                Prompts
+                                <span class="fac-tab-count" id="tab-count-prompts" aria-hidden="true">–</span>
+                            </button>
+                            <button class="fac-top-tab" data-tab="skills" role="tab" id="tab-skills" aria-selected="false" aria-controls="tab-panel-skills" tabindex="-1">
+                                ${ns.icon('graduation-cap')}
+                                Skills
+                                <span class="fac-tab-count" id="tab-count-skills" aria-hidden="true">–</span>
+                            </button>
+                            <button class="fac-top-tab" data-tab="settings" role="tab" id="tab-settings" aria-selected="false" aria-controls="tab-panel-settings" tabindex="-1">
+                                ${ns.icon('sliders-horizontal')}
+                                Settings
+                            </button>
+                        </div>
+
+                        <!-- TOOLS TAB PANEL -->
+                        <div class="fac-tab-panel active" id="tab-panel-tools" role="tabpanel" aria-labelledby="tab-tools" tabindex="0">
+
+                            <!-- View Mode Tabs -->
+                            <div class="fac-view-tabs" role="tablist" aria-label="Tool registry view mode">
+                                <button type="button" class="fac-view-tab active" data-view="plugins" role="tab" aria-selected="true" tabindex="0">
+                                    ${ns.icon('box')} Plugins
+                                </button>
+                                <button type="button" class="fac-view-tab" data-view="tools" role="tab" aria-selected="false" tabindex="-1">
+                                    ${ns.icon('wrench')} Individual Tools
+                                </button>
+                            </div>
+
+                            <!-- Filter + Bulk Actions Bar (shown in tools view) -->
+                            <div class="fac-filter-bar" id="tools-filter-bar" style="display: none;">
+                                <input type="text" class="fac-filter-input" id="tool-search"
+                                       placeholder="Search tools..." aria-label="Search tools">
+                                <select class="fac-filter-select" id="category-filter" aria-label="Filter by category">
+                                    <option value="">All Categories</option>
+                                    <option value="read_only">Read Only</option>
+                                    <option value="write">Write</option>
+                                    <option value="read_write">Read & Write</option>
+                                    <option value="privileged">Privileged</option>
+                                </select>
+                                <select class="fac-filter-select" id="plugin-filter" aria-label="Filter by plugin">
+                                    <option value="">All Plugins</option>
+                                </select>
+                                <span id="bulk-scope-count" class="fac-bulk-scope" aria-live="polite"></span>
+                                <button class="btn btn-xs btn-success" id="bulk-enable-btn" disabled>
+                                    ${ns.icon('check')} <span class="fac-btn-label">Enable matching</span>
+                                </button>
+                                <button class="btn btn-xs btn-warning" id="bulk-disable-btn" disabled>
+                                    ${ns.icon('x')} <span class="fac-btn-label">Disable matching</span>
+                                </button>
+                            </div>
+
+                            <div id="tool-registry" class="fac-scroll-area">
+                                <div class="fac-skeleton-wrap"><div class="fac-skeleton-card"><div class="fac-skeleton-line fac-skeleton-line--title"></div><div class="fac-skeleton-line fac-skeleton-line--body"></div></div><div class="fac-skeleton-card"><div class="fac-skeleton-line fac-skeleton-line--title"></div><div class="fac-skeleton-line fac-skeleton-line--body"></div></div><div class="fac-skeleton-card"><div class="fac-skeleton-line fac-skeleton-line--title"></div><div class="fac-skeleton-line fac-skeleton-line--body"></div></div></div>
                             </div>
                         </div>
+
+                        <!-- PROMPT TEMPLATES TAB PANEL -->
+                        <div class="fac-tab-panel" id="tab-panel-prompts" role="tabpanel" aria-labelledby="tab-prompts" tabindex="0">
+                            <div class="fac-filter-bar">
+                                <input type="text" class="fac-filter-input" id="prompt-search"
+                                       placeholder="Search templates..." aria-label="Search templates">
+                                <select class="fac-filter-select" id="prompt-status-filter" aria-label="Filter by status">
+                                    <option value="">All Statuses</option>
+                                    <option value="Published">Published</option>
+                                    <option value="Draft">Draft</option>
+                                    <option value="Deprecated">Deprecated</option>
+                                    <option value="Archived">Archived</option>
+                                </select>
+                            </div>
+                            <div id="prompt-templates-list" class="fac-scroll-area">
+                                <div class="fac-skeleton-wrap"><div class="fac-skeleton-card"><div class="fac-skeleton-line fac-skeleton-line--title"></div><div class="fac-skeleton-line fac-skeleton-line--body"></div></div><div class="fac-skeleton-card"><div class="fac-skeleton-line fac-skeleton-line--title"></div><div class="fac-skeleton-line fac-skeleton-line--body"></div></div></div>
+                            </div>
+                        </div>
+
+                        <!-- SKILLS TAB PANEL -->
+                        <div class="fac-tab-panel" id="tab-panel-skills" role="tabpanel" aria-labelledby="tab-skills" tabindex="0">
+                            <div class="fac-filter-bar">
+                                <input type="text" class="fac-filter-input" id="skill-search"
+                                       placeholder="Search skills..." aria-label="Search skills">
+                                <select class="fac-filter-select" id="skill-type-filter" aria-label="Filter by type">
+                                    <option value="">All Types</option>
+                                    <option value="Tool Usage">Tool Usage</option>
+                                    <option value="Workflow">Workflow</option>
+                                </select>
+                                <select class="fac-filter-select" id="skill-status-filter" aria-label="Filter by status">
+                                    <option value="">All Statuses</option>
+                                    <option value="Published">Published</option>
+                                    <option value="Draft">Draft</option>
+                                    <option value="Deprecated">Deprecated</option>
+                                </select>
+                            </div>
+                            <div id="skills-list" class="fac-scroll-area">
+                                <div class="fac-skeleton-wrap"><div class="fac-skeleton-card"><div class="fac-skeleton-line fac-skeleton-line--title"></div><div class="fac-skeleton-line fac-skeleton-line--body"></div></div><div class="fac-skeleton-card"><div class="fac-skeleton-line fac-skeleton-line--title"></div><div class="fac-skeleton-line fac-skeleton-line--body"></div></div></div>
+                            </div>
+                        </div>
+
+                        <!-- SETTINGS TAB PANEL -->
+                        <div class="fac-tab-panel" id="tab-panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0">
+                            <div class="fac-settings-layout">
+                                <nav class="fac-settings-nav" id="settings-nav" role="tablist" aria-orientation="vertical" aria-label="Settings groups"></nav>
+                                <div class="fac-settings-pane" id="settings-pane" role="tabpanel"></div>
+                            </div>
+                        </div>
+
                     </div>
-                </div>
-            </div>
 
-            <!-- Stats Grid -->
-            <div class="fac-stats-grid">
-                <div class="fac-stat-card" style="border-left-color: var(--primary);">
-                    <h3>Plugins</h3>
-                    <div id="plugin-stats">
-                        <div class="fac-stat-value">-</div>
-                        <div class="fac-stat-label">Loading...</div>
-                    </div>
-                </div>
-                <div class="fac-stat-card" style="border-left-color: var(--green-500);">
-                    <h3>Tools Available</h3>
-                    <div id="tool-stats">
-                        <div class="fac-stat-value">-</div>
-                        <div class="fac-stat-label">Loading...</div>
-                    </div>
-                </div>
-                <div class="fac-stat-card" style="border-left-color: var(--blue-500);">
-                    <h3>Today's Activity</h3>
-                    <div id="activity-stats">
-                        <div class="fac-stat-value">-</div>
-                        <div class="fac-stat-label">Tool executions today</div>
-                    </div>
-                </div>
-            </div>
+                    <!-- RIGHT: sticky sidebar with status, chat, analytics, actions -->
+                    <aside class="fac-sidebar" aria-label="Operations">
 
-            <!-- Tools Registry -->
-            <div class="fac-card">
-                <div class="fac-card-header">
-                    <div class="fac-card-title">
-                        <i class="fa fa-tools"></i>
-                        Tool Registry
-                    </div>
-                    <button class="btn btn-sm btn-default" id="refresh-tools">
-                        <i class="fa fa-refresh"></i> Refresh
-                    </button>
-                </div>
-                <div id="tool-registry" style="max-height: 500px; overflow-y: auto;">
-                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
-                        <i class="fa fa-spinner fa-spin"></i> Loading tools...
-                    </div>
-                </div>
-            </div>
+                        <!-- System / MCP card -->
+                        <div class="fac-card fac-sidebar-card">
+                            <div class="fac-sidebar-row">
+                                <span class="fac-sidebar-label">MCP endpoint</span>
+                                <button type="button" class="btn btn-xs btn-default fac-copy-endpoint" id="copy-endpoint" aria-label="Copy MCP endpoint URL" title="Copy endpoint URL">
+                                    ${ns.icon('copy')}
+                                </button>
+                            </div>
+                            <div class="fac-endpoint-url fac-endpoint-compact" id="fac-mcp-endpoint">Loading...</div>
+                            <div class="fac-sidebar-actions">
+                                <button class="btn btn-xs btn-default" id="open-settings">
+                                    ${ns.icon('settings')} Advanced form
+                                </button>
+                            </div>
+                        </div>
 
-            <!-- Recent Activity -->
-            <div class="fac-card">
-                <div class="fac-card-header">
-                    <div class="fac-card-title">
-                        <i class="fa fa-history"></i>
-                        Recent Activity
-                    </div>
-                </div>
-                <div id="recent-activity">
-                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
-                        <i class="fa fa-spinner fa-spin"></i> Loading activity...
-                    </div>
-                </div>
-            </div>
-        </div>
-    `);
-
-    // Load server status
-    function loadServerStatus() {
-        frappe.call({
-            method: "frappe.client.get",
-            args: {
-                doctype: "Assistant Core Settings",
-                name: "Assistant Core Settings"  // Required for Single DocTypes
-            },
-            callback: function(response) {
-                if (response.message) {
-                    const settings = response.message;
-                    const isEnabled = settings.server_enabled;
-
-                    // Update status
-                    const statusIcon = $('#server-status-icon');
-                    const statusText = $('#server-status-text');
-                    const toggleBtn = $('#toggle-server');
-                    const toggleText = $('#toggle-server-text');
-
-                    if (isEnabled) {
-                        statusIcon.removeClass('inactive').addClass('active');
-                        statusText.text('Frappe Assistant Core - Running');
-                        toggleBtn.removeClass('btn-primary').addClass('btn-warning');
-                        toggleText.html('<i class="fa fa-stop"></i> Disable');
-                    } else {
-                        statusIcon.removeClass('active').addClass('inactive');
-                        statusText.text('Frappe Assistant Core - Stopped');
-                        toggleBtn.removeClass('btn-warning').addClass('btn-primary');
-                        toggleText.html('<i class="fa fa-play"></i> Enable');
-                    }
-
-                    // Update MCP Endpoint URL from settings (with fallback)
-                    let endpointUrl = settings.mcp_endpoint_url;
-                    if (!endpointUrl || endpointUrl === '') {
-                        // Generate URL client-side if not set
-                        endpointUrl = window.location.origin + '/api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp';
-                    }
-                    $('#fac-mcp-endpoint').text(endpointUrl);
-                }
-            },
-            error: function(r) {
-                console.error('Failed to load server status:', r);
-                $('#fac-mcp-endpoint').text('Error loading endpoint');
-            }
-        });
-    }
-
-    // Toggle server
-    function toggleServer() {
-        frappe.call({
-            method: "frappe_assistant_core.api.admin_api.get_server_settings",
-            callback: function(response) {
-                if (response.message) {
-                    const currentState = response.message.server_enabled;
-                    const newState = currentState ? 0 : 1;
-
-                    frappe.call({
-                        method: "frappe_assistant_core.api.admin_api.update_server_settings",
-                        args: {
-                            server_enabled: newState
-                        },
-                        callback: function(result) {
-                            if (result.message) {
-                                frappe.show_alert({
-                                    message: newState ? 'FAC Server Enabled' : 'FAC Server Disabled',
-                                    indicator: newState ? 'green' : 'orange'
-                                });
-
-                                // Reload status (cache is cleared by API)
-                                setTimeout(function() {
-                                    loadServerStatus();
-                                }, 300);
-                            }
-                        }
-                    });
-                }
-            }
-        });
-    }
-
-    // Load plugin and tool stats
-    function loadStats() {
-        frappe.call({
-            method: "frappe_assistant_core.api.admin_api.get_plugin_stats",
-            callback: function(response) {
-                if (response.message) {
-                    const stats = response.message;
-                    $('#plugin-stats').html(`
-                        <div class="fac-stat-value">${stats.enabled_count || 0}</div>
-                        <div class="fac-stat-label">${stats.enabled_count} enabled / ${stats.total_count} total</div>
-                    `);
-                }
-            }
-        });
-
-        frappe.call({
-            method: "frappe_assistant_core.api.admin_api.get_tool_stats",
-            callback: function(response) {
-                if (response.message) {
-                    const stats = response.message;
-                    $('#tool-stats').html(`
-                        <div class="fac-stat-value">${stats.total_tools || 0}</div>
-                        <div class="fac-stat-label">Registered tools</div>
-                    `);
-                }
-            }
-        });
-
-        frappe.call({
-            method: "frappe_assistant_core.api.admin_api.get_usage_statistics",
-            callback: function(response) {
-                if (response.message && response.message.success) {
-                    const stats = response.message.data;
-                    $('#activity-stats').html(`
-                        <div class="fac-stat-value">${stats.audit_logs?.today || 0}</div>
-                        <div class="fac-stat-label">Tool executions today</div>
-                    `);
-                }
-            }
-        });
-    }
-
-    // Load tool registry organized by plugin with inline toggle
-    function loadToolRegistry() {
-        frappe.call({
-            method: "frappe_assistant_core.api.admin_api.get_plugin_stats",
-            callback: function(response) {
-                if (response.message && response.message.plugins) {
-                    const plugins = response.message.plugins;
-                    if (plugins.length > 0) {
-                        const pluginsHtml = plugins.map(plugin => `
-                            <div class="fac-plugin-item">
-                                <div class="fac-plugin-header">
-                                    <div class="fac-plugin-info">
-                                        <div class="fac-plugin-name">
-                                            <i class="fa fa-cube"></i>
-                                            ${plugin.name}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="switch" style="margin: 0;">
-                                            <input type="checkbox" class="fac-plugin-toggle"
-                                                   data-plugin="${plugin.plugin_id}"
-                                                   ${plugin.enabled ? 'checked' : ''}>
-                                            <span class="slider round"></span>
-                                        </label>
-                                    </div>
+                        <!-- FAC Chat card -->
+                        <div class="fac-card fac-sidebar-card" id="fac-chat-card">
+                            <div class="fac-sidebar-row">
+                                <div class="fac-sidebar-title">
+                                    ${ns.icon('messages-square')}
+                                    FAC Chat
+                                    <span id="fac-chat-status-pill" class="fac-status-pill" role="status" aria-live="polite"></span>
                                 </div>
                             </div>
-                        `).join('');
-                        $('#tool-registry').html(pluginsHtml);
+                            <div class="fac-sidebar-subtle">Widget on Desk · <code>/copilot</code> SPA</div>
+                            <div class="fac-sidebar-actions">
+                                <button class="btn btn-xs btn-primary" id="toggle-fac-chat">
+                                    <span id="toggle-fac-chat-text">Loading...</span>
+                                </button>
+                                <a href="/copilot" target="_blank" rel="noopener" class="btn btn-xs btn-default" id="open-copilot" aria-label="Open Copilot in a new tab">
+                                    ${ns.icon('external-link')}
+                                </a>
+                            </div>
+                        </div>
 
-                        // Add toggle handlers
-                        $('.fac-plugin-toggle').on('change', function() {
-                            const pluginName = $(this).data('plugin');
-                            const isEnabled = $(this).is(':checked');
-                            togglePlugin(pluginName, isEnabled);
-                        });
-                    } else {
-                        $('#tool-registry').html('<div style="padding: 20px; text-align: center; color: var(--text-muted);">No tools available</div>');
-                    }
-                }
-            },
-            error: function() {
-                $('#tool-registry').html('<div style="padding: 20px; text-align: center; color: var(--red-500);">Failed to load tools</div>');
-            }
-        });
-    }
+                        <!-- Chat Analytics card (hidden when chat is disabled) -->
+                        <div class="fac-card fac-sidebar-card" id="fac-chat-analytics-card" style="display: none;">
+                            <div class="fac-sidebar-row">
+                                <div class="fac-sidebar-title">
+                                    ${ns.icon('chart-line')} Chat usage
+                                </div>
+                            </div>
+                            <div class="fac-analytics-grid">
+                                <div class="fac-analytics-cell">
+                                    <div class="fac-analytics-label">This month</div>
+                                    <div class="fac-analytics-value" id="analytics-monthly">–</div>
+                                </div>
+                                <div class="fac-analytics-cell">
+                                    <div class="fac-analytics-label">All time</div>
+                                    <div class="fac-analytics-value" id="analytics-total">–</div>
+                                </div>
+                                <div class="fac-analytics-cell">
+                                    <div class="fac-analytics-label">Active users</div>
+                                    <div class="fac-analytics-value" id="analytics-users">–</div>
+                                </div>
+                                <div class="fac-analytics-cell">
+                                    <div class="fac-analytics-label">Credits</div>
+                                    <div class="fac-analytics-value fac-analytics-value--money" id="analytics-credits">–</div>
+                                </div>
+                            </div>
+                            <div class="fac-analytics-spark" id="analytics-spark" aria-label="Daily messages, last 30 days"></div>
+                        </div>
 
-    // Toggle plugin enabled/disabled
-    function togglePlugin(pluginName, enabled) {
-        // Disable checkbox during API call to prevent double-clicks
-        const checkbox = $(`.fac-plugin-toggle[data-plugin="${pluginName}"]`);
-        const originalState = checkbox.prop('checked');
-        checkbox.prop('disabled', true);
+                        <!-- Quick Actions card -->
+                        <div class="fac-card fac-sidebar-card">
+                            <div class="fac-sidebar-row">
+                                <div class="fac-sidebar-title">${ns.icon('zap')} Quick actions</div>
+                            </div>
+                            <ul class="fac-quick-list">
+                                <li><a href="/app/assistant-audit-log">${ns.icon('history')} Audit log</a></li>
+                                <li><a href="/app/fac-chat-settings">${ns.icon('circle-user')} FAC Chat Settings</a></li>
+                                <li><a href="/app/assistant-core-settings">${ns.icon('settings-2')} Assistant settings</a></li>
+                                <li><a href="/copilot" target="_blank" rel="noopener">${ns.icon('external-link')} Open Copilot</a></li>
+                            </ul>
+                        </div>
 
-        frappe.call({
-            method: "frappe_assistant_core.api.admin_api.toggle_plugin",
-            args: {
-                plugin_name: pluginName,
-                enable: enabled
-            },
-            freeze: true,
-            freeze_message: __('Updating plugin...'),
-            callback: function(response) {
-                if (response.message && response.message.success) {
-                    frappe.show_alert({
-                        message: response.message.message,
-                        indicator: enabled ? 'green' : 'orange'
-                    });
-                    // Refresh both registry and stats after successful toggle
-                    loadStats();
-                    loadToolRegistry();
+                        <!-- Recent Activity card -->
+                        <div class="fac-card fac-sidebar-card">
+                            <div class="fac-sidebar-row">
+                                <div class="fac-sidebar-title">${ns.icon('history')} Recent activity</div>
+                                <a href="/app/assistant-audit-log" class="fac-view-all">View all ${ns.icon('arrow-right')}</a>
+                            </div>
+                            <div id="recent-activity" class="fac-activity-list">
+                                <div style="padding: 12px 0; text-align: center; color: var(--text-muted);">
+                                    ${ns.icon('loader-circle', { spin: true })} Loading...
+                                </div>
+                            </div>
+                        </div>
+
+                    </aside>
+
+                </div>
+            </div>
+        `);
+
+        // Load JS submodules, then wire event handlers and start data loading
+        return frappe.require([
+            "/assets/frappe_assistant_core/js/fac_admin_tools.js",
+            "/assets/frappe_assistant_core/js/fac_admin_prompts.js",
+            "/assets/frappe_assistant_core/js/fac_admin_skills.js",
+            "/assets/frappe_assistant_core/js/fac_admin_settings_form.js",
+            "/assets/frappe_assistant_core/js/fac_admin_settings_embed.js",
+            "/assets/frappe_assistant_core/js/fac_admin_settings.js"
+        ]).then(function() {
+
+            // =====================================================================
+            // Event handlers
+            // =====================================================================
+
+            // Server toggle
+            $('#toggle-server').on('click', ns.toggleServer);
+            $('#open-settings').on('click', function() {
+                frappe.set_route('Form', 'Assistant Core Settings');
+            });
+
+            // FAC Chat toggle
+            $('#toggle-fac-chat').on('click', ns.toggleFacChat);
+
+            // Copy MCP endpoint URL to clipboard
+            $('#copy-endpoint').on('click', function() {
+                const url = $('#fac-mcp-endpoint').text().trim();
+                if (!url || url === 'Loading...') return;
+                frappe.utils.copy_to_clipboard(url);
+            });
+
+            // Global refresh — pulls everything visible on the page
+            $('#refresh-all').on('click', function() {
+                ns.state.lastRefreshedAt = new Date();
+                if (typeof ns.updateLastRefreshedLabel === 'function') ns.updateLastRefreshedLabel();
+                ns.loadServerStatus();
+                ns.loadChatStatus();
+                ns.loadStats();
+                ns.loadRecentActivity();
+                ns.loadToolRegistry();
+                if (typeof ns.loadChatAnalytics === 'function') ns.loadChatAnalytics();
+            });
+
+            // View mode tab handlers (Plugins / Individual Tools)
+            ns.activateViewTab = function($tab) {
+                const viewMode = $tab.data('view');
+                if (viewMode === ns.state.viewMode) return;
+
+                $('.fac-view-tab')
+                    .removeClass('active')
+                    .attr({ 'aria-selected': 'false', tabindex: '-1' });
+                $tab
+                    .addClass('active')
+                    .attr({ 'aria-selected': 'true', tabindex: '0' });
+
+                ns.state.viewMode = viewMode;
+
+                if (viewMode === 'tools') {
+                    $('#tools-filter-bar').show();
                 } else {
-                    // Reset checkbox to original state on error
-                    checkbox.prop('checked', originalState);
-                    frappe.show_alert({
-                        message: response.message?.message || 'Unknown error',
-                        indicator: 'red'
-                    });
+                    $('#tools-filter-bar').hide();
                 }
-            },
-            error: function() {
-                // Reset checkbox to original state on error
-                checkbox.prop('checked', originalState);
-                frappe.show_alert({
-                    message: 'Error toggling plugin',
-                    indicator: 'red'
-                });
-            },
-            always: function() {
-                // Re-enable checkbox
-                checkbox.prop('disabled', false);
-            }
-        });
-    }
 
-    // Load recent activity
-    function loadRecentActivity() {
-        frappe.call({
-            method: "frappe_assistant_core.api.admin_api.get_usage_statistics",
-            callback: function(response) {
-                if (response.message && response.message.success) {
-                    const activities = response.message.data.recent_activity || [];
-                    if (activities.length > 0) {
-                        const tableHtml = `
-                            <table class="fac-table">
-                                <thead>
-                                    <tr>
-                                        <th>Action</th>
-                                        <th>Tool</th>
-                                        <th>User</th>
-                                        <th>Status</th>
-                                        <th>Time</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${activities.slice(0, 5).map(a => `
-                                        <tr>
-                                            <td>${a.action}</td>
-                                            <td>${a.tool_name || '-'}</td>
-                                            <td>${a.user}</td>
-                                            <td>
-                                                <span class="indicator-pill ${a.status === 'Success' ? 'green' : 'red'}">
-                                                    ${a.status}
-                                                </span>
-                                            </td>
-                                            <td style="color: var(--text-muted);">
-                                                ${frappe.datetime.str_to_user(a.timestamp)}
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        `;
-                        $('#recent-activity').html(tableHtml);
-                    } else {
-                        $('#recent-activity').html('<div style="padding: 20px; text-align: center; color: var(--text-muted);">No recent activity</div>');
+                ns.loadToolRegistry();
+            };
+
+            $('.fac-view-tab').on('click', function() {
+                ns.activateViewTab($(this));
+            });
+
+            // Filter handlers (for tools view)
+            $('#tool-search').on('input', frappe.utils.debounce(function() {
+                if (ns.state.viewMode === 'tools') {
+                    ns.renderToolsList();
+                }
+            }, 300));
+
+            $('#category-filter, #plugin-filter').on('change', function() {
+                if (ns.state.viewMode === 'tools') {
+                    ns.renderToolsList();
+                    if (typeof ns.updateBulkScopeCount === 'function') {
+                        ns.updateBulkScopeCount();
                     }
                 }
-            },
-            error: function() {
-                $('#recent-activity').html('<div style="padding: 20px; text-align: center; color: var(--red-500);">Failed to load activity</div>');
+            });
+
+            // Bulk action button handlers (scoped to current filter bar selection)
+            $('#bulk-enable-btn').on('click', function() {
+                const category = $('#category-filter').val();
+                const plugin = $('#plugin-filter').val();
+                ns.bulkToggleByCategory(category, plugin, true);
+            });
+
+            $('#bulk-disable-btn').on('click', function() {
+                const category = $('#category-filter').val();
+                const plugin = $('#plugin-filter').val();
+                ns.bulkToggleByCategory(category, plugin, false);
+            });
+
+            // Top-level tab switching. Leaving Settings with unsaved edits asks first.
+            ns.switchTab = function(tabName) {
+                if (ns.state.activeTab === tabName) return;
+                if (ns.state.activeTab === 'settings') {
+                    ns.confirmLeaveSettings(function() { activateTab(tabName); });
+                    return;
+                }
+                activateTab(tabName);
+            };
+
+            function activateTab(tabName) {
+                ns.state.activeTab = tabName;
+
+                $('.fac-top-tab')
+                    .removeClass('active')
+                    .attr({ 'aria-selected': 'false', tabindex: '-1' });
+                $(`.fac-top-tab[data-tab="${tabName}"]`)
+                    .addClass('active')
+                    .attr({ 'aria-selected': 'true', tabindex: '0' });
+
+                $('.fac-tab-panel').removeClass('active');
+                $(`#tab-panel-${tabName}`).addClass('active');
+
+                if (tabName === 'prompts' && ns.state.promptsData.length === 0) {
+                    ns.loadPromptTemplatesView();
+                } else if (tabName === 'skills' && ns.state.skillsData.length === 0) {
+                    ns.loadSkillsView();
+                } else if (tabName === 'settings') {
+                    ns.loadSettingsView();
+                }
+                ns.writeSettingsUrl(tabName, tabName === 'settings' ? ns.settings.activeKey : null);
             }
+
+            $('.fac-top-tab').on('click', function() {
+                ns.switchTab($(this).data('tab'));
+            });
+
+            // Arrow-key navigation for tab lists (WAI-ARIA pattern)
+            function handleTabKeydown(e, $tabs, activate) {
+                const key = e.key;
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return;
+                e.preventDefault();
+                const count = $tabs.length;
+                const currentIndex = $tabs.index(e.currentTarget);
+                let nextIndex = currentIndex;
+                if (key === 'ArrowRight') nextIndex = (currentIndex + 1) % count;
+                else if (key === 'ArrowLeft') nextIndex = (currentIndex - 1 + count) % count;
+                else if (key === 'Home') nextIndex = 0;
+                else if (key === 'End') nextIndex = count - 1;
+                const $next = $tabs.eq(nextIndex);
+                $next.trigger('focus');
+                activate($next);
+            }
+
+            $('.fac-top-tabs').on('keydown', '.fac-top-tab', function(e) {
+                handleTabKeydown(e, $('.fac-top-tab'), function($tab) {
+                    ns.switchTab($tab.data('tab'));
+                });
+            });
+
+            $('.fac-view-tabs').on('keydown', '.fac-view-tab', function(e) {
+                handleTabKeydown(e, $('.fac-view-tab'), function($tab) {
+                    ns.activateViewTab($tab);
+                });
+            });
+
+            // Prompt Templates filter handlers
+            $('#prompt-search').on('input', frappe.utils.debounce(function() {
+                if (ns.state.activeTab === 'prompts') ns.renderPromptTemplatesList();
+            }, 300));
+
+            $('#prompt-status-filter').on('change', function() {
+                if (ns.state.activeTab === 'prompts') ns.renderPromptTemplatesList();
+            });
+
+            $('#refresh-prompts').on('click', ns.loadPromptTemplatesView);
+
+            // Skills filter handlers
+            $('#skill-search').on('input', frappe.utils.debounce(function() {
+                if (ns.state.activeTab === 'skills') ns.renderSkillsList();
+            }, 300));
+
+            $('#skill-type-filter, #skill-status-filter').on('change', function() {
+                if (ns.state.activeTab === 'skills') ns.renderSkillsList();
+            });
+
+            $('#refresh-skills').on('click', ns.loadSkillsView);
+
+            // =====================================================================
+            // Initial data load
+            // =====================================================================
+            ns.bindSettingsEvents();
+            const startTab = ns.initialTab();
+            if (startTab !== 'tools') ns.switchTab(startTab);
+            ns.state.lastRefreshedAt = new Date();
+            ns.loadServerStatus();
+            ns.loadChatStatus();
+            ns.loadStats();
+            ns.loadToolRegistry();
+            ns.loadRecentActivity();
+            if (typeof ns.loadChatAnalytics === 'function') ns.loadChatAnalytics();
+
+            // "Updated Xs ago" ticker — cheap, local-only
+            ns.updateLastRefreshedLabel = function() {
+                const ts = ns.state.lastRefreshedAt;
+                if (!ts) return;
+                const seconds = Math.max(0, Math.round((Date.now() - ts.getTime()) / 1000));
+                let label;
+                if (seconds < 5) label = 'Updated just now';
+                else if (seconds < 60) label = `Updated ${seconds}s ago`;
+                else label = `Updated ${Math.round(seconds / 60)}m ago`;
+                $('#fac-last-refreshed').text(label);
+            };
+            setInterval(ns.updateLastRefreshedLabel, 5000);
+            ns.updateLastRefreshedLabel();
+
+            // Auto-refresh every 30 seconds (respects autoRefreshEnabled flag)
+            setInterval(function() {
+                if (!ns.state.autoRefreshEnabled || Object.keys(ns.state.toggleInProgress).length > 0) {
+                    return;
+                }
+
+                ns.state.lastRefreshedAt = new Date();
+                ns.updateLastRefreshedLabel();
+                ns.loadServerStatus();
+                ns.loadStats();
+                ns.loadRecentActivity();
+                if (typeof ns.loadChatAnalytics === 'function') ns.loadChatAnalytics();
+                // Note: We intentionally don't auto-refresh loadToolRegistry() here
+                // to avoid interfering with user toggle interactions
+            }, 30000);
         });
-    }
-
-    // Event handlers
-    $('#toggle-server').on('click', toggleServer);
-    $('#open-settings').on('click', function() {
-        frappe.set_route('Form', 'Assistant Core Settings');
     });
-    $('#refresh-tools').on('click', loadToolRegistry);
-
-    // Initial load
-    loadServerStatus();
-    loadStats();
-    loadToolRegistry();
-    loadRecentActivity();
-
-    // Auto-refresh every 30 seconds (but NOT tool registry to avoid disrupting user interactions)
-    setInterval(function() {
-        loadServerStatus();
-        loadStats();
-        loadRecentActivity();
-        // Note: We intentionally don't auto-refresh loadToolRegistry() here
-        // to avoid interfering with user plugin toggle interactions
-    }, 30000);
 };

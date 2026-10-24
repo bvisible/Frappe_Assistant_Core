@@ -1,0 +1,321 @@
+# Release & Branching Guide
+
+## Branching Strategy
+
+```
+main          ← production-ready, auto-releases on merge
+beta          ← pre-release channel, auto-publishes X.Y.Z-beta.N
+develop       ← integration branch, all PRs target here
+feature/*     ← new features
+bug/*         ← bug fixes
+improvement/* ← refactors/enhancements
+hotfix/*      ← urgent production fixes → PR to main
+```
+
+## Branch Naming
+
+| Type | Pattern | Example | PR Target |
+|------|---------|---------|-----------|
+| Feature | `feature/<short-description>` | `feature/tool_management_system` | `develop` |
+| Bug fix | `bug/<issue#>-<short-description>` | `bug/109-auth-credential-leak` | `develop` |
+| Improvement | `improvement/<short-description>` | `improvement/ocr_extraction` | `develop` |
+| Hotfix | `hotfix/<short-description>` | `hotfix/make-paddleocr-optional` | `main` |
+
+## Conventional Commits (Required)
+
+All commit messages must follow the [Conventional Commits](https://www.conventionalcommits.org/) format. This is enforced by CI on all PRs.
+
+```
+<type>: <description>
+
+[optional body]
+```
+
+| Prefix | Version Bump | Example |
+|--------|-------------|---------|
+| `feat:` | MINOR (2.3.2 -> 2.4.0) | `feat: add PDF table extraction tool` |
+| `fix:` | PATCH (2.3.2 -> 2.3.3) | `fix: prevent OCR crash on empty file` |
+| `perf:` | PATCH | `perf: cache plugin registry lookups` |
+| `revert:` | PATCH | `revert: back out tool annotation hints` |
+| `feat!:` | MAJOR (2.3.2 -> 3.0.0) | `feat!: remove STDIO bridge support` |
+| `refactor:` | No release | `refactor: extract auth logic to mixin` |
+| `docs:` | No release | `docs: update OAuth setup guide` |
+| `chore:` | No release | `chore: update dev dependencies` |
+| `ci:` | No release | `ci: add Python 3.14 to test matrix` |
+| `test:` | No release | `test: add plugin toggle tests` |
+| `style:` | No release | `style: fix import order` |
+
+`.releaserc` uses the `angular` preset, under which **only `feat`, `fix`, `perf`, `revert`, and breaking changes cut a release.** Everything else lands in `develop` and ships with the next release that contains one of those, contributing nothing to the version number.
+
+## Release Flow (Automated)
+
+Releases are fully automated via `semantic-release` (same toolchain as Frappe and ERPNext).
+
+1. Merge feature/bug/improvement PRs into `develop`
+2. Write the change log file (see "Change Log Files" section below)
+3. Raise a PR from `develop` to `main`, wait for CI, then **fast-forward `main`** to `develop` — see "Merging develop into main" below
+4. **Automatic**: semantic-release runs on push to `main` and:
+   - Detects version bump from commit messages
+   - Updates `pyproject.toml` and `frappe_assistant_core/__init__.py`
+   - Commits, tags, and pushes
+   - Creates GitHub Release with auto-generated notes
+   - `assets.yml` then publishes the release commit's prebuilt assets
+5. Fast-forward `develop` to `main` — **not** `git merge main`, which duplicates history. See "Merging develop into main" below.
+6. Advertise the release on the Frappe Marketplace once `assets.yml` has finished — **manual**, see "Publishing to the Frappe Marketplace" below.
+
+No manual version bumping, tagging, or release creation needed. Do **not** hand-edit
+`__version__` or `pyproject.toml`; `.releaserc` rewrites both with `sed` and commits
+them as `chore(release): vX.Y.Z`, so a hand-set value is overwritten.
+
+## Merging develop into main
+
+`main` has **Require linear history** enabled, so a merge commit is rejected outright.
+After each release `develop` is fast-forwarded to `main`, so `main` is always an ancestor
+of `develop` and the release can land as a plain fast-forward: no commit is rewritten.
+
+**Fast-forward `main` to `develop`, then fast-forward `develop` to the release commit.
+Never merge `main` back into `develop`.**
+
+```bash
+# 1. release — once CI on the develop -> main PR is green
+git fetch origin
+git merge-base --is-ancestor origin/main origin/develop   # must succeed
+git push origin <develop-sha>:main     # the PR is marked merged; semantic-release runs
+
+# 2. reconcile — after chore(release) lands on main
+git fetch origin
+git push origin origin/main:refs/heads/develop             # a fast-forward, no force
+```
+
+Pushing to `main` needs an admin, which branch protection allows because "Enforce for
+admins" is off. Do not use the PR's merge button:
+
+- **Rebase and merge** fails on release PRs with "This branch can't be rebased", even with
+  no conflicts and no merge commits — it refused v3.2.0's 218 commits. v3.1.0 also landed
+  by fast-forward: its commits on `main` keep their `develop` SHAs.
+- **Squash and merge** collapses the release to one commit, so the GitHub release loses
+  its per-change notes.
+
+### Why not `git merge main`
+
+Rebase rewrites every commit's SHA. Merging those rewritten commits back into `develop`,
+which still holds the originals, leaves `develop` carrying two copies of every released
+change — permanently:
+
+```
+main:     d07f696  fix: prevent list_documents permission leak   <- released
+develop:  9c83374  fix: prevent list_documents permission leak   <- original
+          d07f696  fix: prevent list_documents permission leak   <- rebased copy, merged back
+```
+
+semantic-release reads `git log <last-tag>..HEAD`. The tag sits on the rebased copy, so
+the originals are *not* ancestors of it — the next release makes them reachable again and
+analyzes them a second time. If any is a `feat:`, the version bumps a minor it should not,
+and the notes re-list changes that already shipped. That is exactly what happened between
+2.5.0 and 2.5.1: `git log main..develop` reported 24 commits when only 11 were new, and
+an already-released `feat:` would have produced 2.6.0 instead of 2.5.1.
+
+The fast-forward avoids it: `develop` moves onto the tagged release commit itself, so the
+next release starts from a clean `git log <tag>..develop`. Nothing is force-pushed, and
+open branches off `develop` need no rebase. If commits landed on `develop` while the
+release ran, the fast-forward is refused — rebase those commits onto `main` instead.
+
+### Commit subjects are the release notes
+
+Every commit that reaches `main` came from a PR squash-merged into `develop`, and GitHub
+composes that squash subject from the **PR title**. Commit Lint does not check it — it
+validates the commits *inside* a PR, not the subject produced at merge time. A
+non-conventional PR title therefore yields a commit that contributes nothing to the
+version and appears nowhere in the release notes.
+
+Two 2.5.1 changes were lost this way — `Fix/run python code…` (#237) and
+`Security/fac skill…` (#238), the second a security fix. Title PRs into `develop` as
+though the title were the commit message, because it becomes one:
+
+```
+fix: apply return_variables as a filter in run_python_code
+```
+
+## Publishing to the Frappe Marketplace
+
+[frappe/marketplace](https://github.com/frappe/marketplace) is the app registry behind
+`bench get-app` and the Marketplace page on Frappe Cloud v2. FAC is listed there as
+`frappe_assistant_core`: metadata in `apps.json`, releases in
+`apps/frappe_assistant_core.json`.
+
+**A release does not reach the marketplace on its own.** Each registry release names one
+immutable commit, and nothing there follows new commits — v3.0.0 and v3.1.0 shipped while
+the registry still advertised 2.5.0. Every release needs a PR to the registry.
+
+### After each stable release
+
+Wait until **Pre-build assets** (`assets.yml`) has finished for the `chore(release)`
+commit; the release `assets-main` then lists `frappe_assistant_core-<sha>.tar.gz` for it.
+Then, from a fork of `frappe/marketplace` (we have read access only, so PRs come from a
+fork):
+
+```bash
+# the chore(release) commit semantic-release just pushed — NOT the merge commit,
+# which still declares the previous version
+COMMIT=$(git rev-parse origin/main)
+
+git clone https://github.com/frappe/marketplace registry
+git clone https://github.com/buildswithpaul/Frappe_Assistant_Core app
+git -C app checkout "$COMMIT"
+pip install packaging
+
+cd registry
+APP=frappe_assistant_core BRANCH=main COMMIT=$COMMIT CHANNEL=stable \
+    python3 tools/add_release.py --app-dir ../app --registry .
+git checkout -b "publish/frappe_assistant_core-${COMMIT:0:8}"
+git commit -am "feat(frappe_assistant_core): advertise vX.Y.Z"
+git push <your-fork> HEAD
+gh pr create --repo frappe/marketplace --head <fork-owner>:publish/frappe_assistant_core-${COMMIT:0:8}
+```
+
+`add_release.py` is the registry's own tool. It reads `version` and
+`[tool.bench.frappe-dependencies].frappe` from `pyproject.toml` at that commit, so the
+entry always matches what the registry's CI checks it against.
+
+- **Stable releases from `main` only.** Skip `beta` prereleases — pilot would install a
+  `-beta.N` as the newest stable.
+- **Do not advertise `develop` as `nightly`.** It shares `main`'s Frappe range, so pilot
+  never falls back to it; the entry only goes stale. Remove the old 2.5.0 `develop` entry
+  in the first PR.
+- **The registry's frappe/marketplace `publish-release.yml` does not work for us.** It
+  pushes its branch to `frappe/marketplace` itself, which needs write access there.
+
+### What the registry's CI checks
+
+The registry clones FAC at the advertised commit and fails the PR on:
+
+1. **Mismatch** — commit not reachable from `branch`, or `version`/`frappe_core`
+   disagreeing with that commit's `pyproject.toml`.
+2. **Semgrep** — its own rules in `validation/semgrep-rules/`, **not** the
+   `frappe/semgrep-rules` set pre-commit runs. A finding blocks when the rule sets
+   `is_blocking: true` or its severity is `ERROR`/`CRITICAL`/`HIGH`. `linter.yml` runs the
+   same rules with the same blocking rule, so a PR into `develop` catches this first.
+3. **Install** — Pilot's `get-app` into a clean venv against the Frappe version
+   `frappe_core` names. The `assistant_runtime_sdk==X.Y.Z` pin must already be on PyPI,
+   and the commit must have **prebuilt assets** on the `assets-main` release — without
+   them the check fails as Critical. `assets.yml` publishes them, using the
+   `[tool.bench.assets]` SPA declaration in `pyproject.toml`; Pilot refuses to build an
+   app that has a `build` script and declares no SPA. v3.2.0's release commit predates
+   both, so the marketplace advertises the later `main` commit that added them.
+
+Suppress a reviewed finding with `# nosemgrep: <rule-id>` on the flagged line. Bandit's
+`# nosec` is ignored by semgrep — the v3.1.0 `subprocess.run` in
+`chat/api/support.py` was blocked for exactly that.
+
+After fixing a finding in FAC, comment `/rereview` on the registry PR to re-run its checks.
+
+### Listing metadata
+
+`apps.json` holds the title, description, logo, website and documentation links. Edit it
+in the same registry PR when they change — the `documentation` link should point at
+<https://docs.assistantcore.cloud>.
+
+## Change Log Files
+
+Frappe reads `frappe_assistant_core/change_log/v2/vX_Y_Z.md` files to show the "What's New" dialog in the UI after users upgrade. These are written manually before merging to main (same as Frappe and ERPNext).
+
+**File path**: `frappe_assistant_core/change_log/v{major}/v{major}_{minor}_{patch}.md`
+
+**Format**:
+```markdown
+## Version X.Y.Z
+
+### Features
+- **Feature name** — short description
+
+### Fixes
+- **Fix name** — short description
+
+### Improvements
+- **Improvement name** — short description
+```
+
+For hotfixes, include the change log file in the hotfix branch before merging to main.
+
+## Pre-release (Beta) Flow
+
+For shipping a major version to early adopters before it is production-ready.
+
+`.releaserc` declares `beta` as a prerelease channel, so semantic-release
+treats pushes there exactly like `main` — except versions get a `-beta.N`
+suffix and the GitHub Release is flagged **pre-release**.
+
+1. Branch `beta` from `main` (not `develop`) so the version maths starts from
+   the last stable release
+2. Push commits using the normal conventional format. A `feat!:` or a
+   `BREAKING CHANGE:` footer on a `beta` branch at 2.5.0 produces `3.0.0-beta.1`
+3. **Automatic**: semantic-release versions, tags, and publishes the GitHub
+   Release marked as pre-release
+4. Each subsequent push to `beta` increments the suffix — `beta.2`, `beta.3`
+5. At GA: merge `beta` into `main`. semantic-release drops the suffix and cuts
+   the stable release
+
+`pip install frappe_assistant_core` will **not** resolve to a pre-release —
+users have to opt in with `--pre` or pin the exact version. That is what makes
+a beta safe to publish alongside a stable line.
+
+`main` keeps serving stable releases and `develop` stays free for work on the
+current major throughout.
+
+## Hotfix Flow
+
+For urgent fixes that can't wait for the next release:
+
+1. Branch from `main`: `git checkout -b hotfix/fix-description main`
+2. Fix and commit using conventional format: `fix: description`
+3. Raise PR targeting `main` (not `develop`)
+4. After merge: semantic-release auto-creates the patch release
+5. Merge `main` back into `develop`: `git checkout develop && git merge main`
+
+## CI Pipeline
+
+| Workflow | Trigger | What it does |
+|----------|---------|-------------|
+| CI (`ci.yml`) | Push to `main`, PRs | Full test suite on Frappe v15 (Python 3.12) AND v16 (Python 3.14) |
+| Linters (`linter.yml`) | PRs | Pre-commit hooks + Frappe semgrep rules + Frappe Marketplace semgrep rules + pip-audit |
+| Commit Lint (`commitlint.yml`) | PRs | Validates conventional commit format |
+| Release (`release.yml`) | Push to `main` or `beta` | Semantic-release: auto-version, tag, GitHub Release (pre-release on `beta`) |
+| Pre-build assets (`assets.yml`) | Push to `main` | Builds the FAC Chat SPA and widget with Pilot and uploads them to the `assets-main` release, for the Frappe Marketplace |
+| Stale (`stale.yml`) | Daily | Auto-closes issues after 30+7 days of inactivity |
+| Welcome (`welcome.yml`) | First issue/PR | Greets first-time contributors |
+
+## Auto-Generated Release Notes
+
+The release body is generated by `@semantic-release/release-notes-generator` from
+**commit subjects**, grouped by conventional-commit type. Anything without a recognised
+prefix is omitted entirely — see "Merging develop into main" above.
+
+`.github/release.yml` below is a *separate* mechanism: it groups merged PRs by label and
+applies only to GitHub's own "Generate release notes" button, which this flow does not
+use. Labels are still worth setting — they organise the notes if someone regenerates them
+by hand — but they do not affect what semantic-release publishes.
+
+`.github/release.yml` groups merged PRs by label:
+
+| Category | Labels |
+|----------|--------|
+| New Features | `feature`, `enhancement` |
+| Security | `security` |
+| Bug Fixes | `bug`, `fix` |
+| Improvements | `improvement`, `refactor`, `performance` |
+| Documentation | `documentation`, `docs` |
+| Other Changes | everything else |
+
+PRs with `skip-changelog` label are excluded from release notes.
+
+Label your PRs before merging so auto-generated notes are organized correctly.
+
+## PR Checklist
+
+- [ ] Commit messages follow conventional commit format
+- [ ] Target `develop` branch (or `main` for hotfixes)
+- [ ] Code passes linters: `pre-commit run --all-files`
+- [ ] Tests pass: `bench --site <site> run-tests --app frappe_assistant_core`
+- [ ] Run `bench migrate` if adding/modifying DocTypes
+- [ ] Add migration patch for settings changes (never use `after_migrate`)
+- [ ] PR title is a valid conventional-commit subject — it becomes the squash commit, and Commit Lint does not check it

@@ -1,3 +1,4 @@
+# //// Neoffice — this file is OUR send_email, not upstream's (see the note below the licence).
 # Frappe Assistant Core - AI Assistant integration for Frappe Framework
 # Copyright (C) 2025 Paul Clinton
 #
@@ -14,18 +15,26 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# //// Neoffice — upstream has a send_email too (queues the mail at once, for the FAC Chat approval card).
+# //// Ours is the first step of a draft-then-confirm flow (a Communication draft, a preview, then confirm_send_email),
+# //// with recipient search and PDF attachments; the hub's MCP clients (sessions, NORA) rely on its contract, so
+# //// the file stays ours. Retire it only together with confirm_send_email and modify_email_draft.
+
 """
 Send Email Tool for Core Plugin.
 Creates email drafts with recipient search, message improvement, and preview.
 """
 
+# //// Neoffice — our send_email (see the note above the docstring).
 from typing import Any, Dict
 import frappe
 from frappe import _
 
+# //// Neoffice — upstream's send_email imports message_body.as_html_body here; ours builds its own body.
 from frappe_assistant_core.core.base_tool import BaseTool
 
 
+# //// Neoffice — the tool class below is ours, not upstream's.
 class SendEmail(BaseTool):
 	"""
 	Tool for sending emails with smart recipient search and message improvement.

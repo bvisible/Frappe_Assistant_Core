@@ -14,6 +14,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# //// Neoffice — added file (no upstream equivalent).
+# //// Former upstream tool, kept after upstream folded it into search_documents: the hub's MCP clients call it by this name.
+
 """
 Search DocType Tool for Core Plugin.
 Search within a specific DocType with permission-aware results.

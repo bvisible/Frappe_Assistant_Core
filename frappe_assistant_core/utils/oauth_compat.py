@@ -143,6 +143,17 @@ def _get_default_oauth_settings():
     )
 
 
+def _has_http_localhost_uris(client_metadata):
+    """Check if client has HTTP localhost redirect URIs (allowed in production per RFC 8252)"""
+    from urllib.parse import urlparse
+
+    for uri in client_metadata.redirect_uris:
+        parsed = urlparse(str(uri))
+        if parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+            return True
+    return False
+
+
 def create_oauth_client(client_metadata):
     """
     Create an OAuth Client from dynamic registration metadata.
@@ -160,9 +171,46 @@ def create_oauth_client(client_metadata):
         # Use native v16 implementation
         from frappe.integrations.utils import create_new_oauth_client
 
-        return create_new_oauth_client(client_metadata)
+        doc = create_new_oauth_client(client_metadata)
+
+        # Fix Frappe v16 bug: create_new_oauth_client uses newline delimiter for redirect_uris,
+        # but oauth.py's validate_redirect_uri expects space delimiter
+        redirect_uris = [str(uri) for uri in client_metadata.redirect_uris]
+        doc.redirect_uris = " ".join(redirect_uris)
+        doc.save(ignore_permissions=True)
+
+        # v16 returns an OAuthClient document, convert to dict for RFC 7591 response
+        redirect_uris = [str(uri) for uri in client_metadata.redirect_uris]
+        response = {
+            "client_id": doc.client_id,
+            "client_secret": doc.get_password("client_secret"),
+            "client_name": doc.app_name,
+            "redirect_uris": redirect_uris,
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": client_metadata.token_endpoint_auth_method or "client_secret_basic",
+        }
+
+        # Add optional metadata fields if provided
+        if client_metadata.client_uri:
+            response["client_uri"] = str(client_metadata.client_uri)
+        if client_metadata.logo_uri:
+            response["logo_uri"] = str(client_metadata.logo_uri)
+        if client_metadata.scope:
+            response["scope"] = client_metadata.scope
+        if client_metadata.contacts:
+            response["contacts"] = client_metadata.contacts
+        if client_metadata.tos_uri:
+            response["tos_uri"] = str(client_metadata.tos_uri)
+        if client_metadata.policy_uri:
+            response["policy_uri"] = str(client_metadata.policy_uri)
+        if client_metadata.software_id:
+            response["software_id"] = client_metadata.software_id
+        if client_metadata.software_version:
+            response["software_version"] = client_metadata.software_version
+
+        return response
     else:
-        # Frappe v15 - create basic OAuth Client without custom fields
         from typing import cast
 
         from frappe.integrations.doctype.oauth_client.oauth_client import OAuthClient
@@ -230,6 +278,7 @@ def validate_dynamic_client_metadata(client_metadata):
 
     For v15: Uses our custom validation logic
     For v16+: Uses native frappe.integrations.utils.validate_dynamic_client_metadata
+              (except for HTTP localhost URIs in production, which use custom validation)
 
     Args:
             client_metadata: OAuth2DynamicClientMetadata pydantic model
@@ -237,13 +286,17 @@ def validate_dynamic_client_metadata(client_metadata):
     Returns:
             str or None: Error message if invalid, None if valid
     """
-    if is_frappe_v16_or_later():
-        # Use native v16 validation
-        from frappe.integrations.utils import validate_dynamic_client_metadata as v16_validate
+    use_custom_validation = False
 
-        return v16_validate(client_metadata)
-    else:
-        # Frappe v15 - custom validation
+    if is_frappe_v16_or_later():
+        if _has_http_localhost_uris(client_metadata):
+            use_custom_validation = True
+        else:
+            from frappe.integrations.utils import validate_dynamic_client_metadata as v16_validate
+
+            return v16_validate(client_metadata)
+
+    if use_custom_validation or not is_frappe_v16_or_later():
         from urllib.parse import urlparse
 
         invalidation_reasons = []
@@ -261,13 +314,11 @@ def validate_dynamic_client_metadata(client_metadata):
         if client_metadata.response_types and not all(rt == "code" for rt in client_metadata.response_types):
             invalidation_reasons.append("only 'code' response_type is supported")
 
-        # Validate HTTPS redirect URIs (allow localhost/127.0.0.1 with http for development)
         for uri in client_metadata.redirect_uris:
-            uri_str = str(uri)  # Convert Pydantic HttpUrl to string
+            uri_str = str(uri)
             parsed_uri = urlparse(uri_str)
 
             if parsed_uri.scheme != "https":
-                # Allow http for localhost and 127.0.0.1 (common for development tools like MCP Inspector)
                 is_localhost = parsed_uri.hostname in ("localhost", "127.0.0.1", "::1")
                 if not is_localhost and not frappe.conf.developer_mode:
                     invalidation_reasons.append(

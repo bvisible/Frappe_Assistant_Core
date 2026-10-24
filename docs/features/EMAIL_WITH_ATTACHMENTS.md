@@ -1,3 +1,4 @@
+<!-- //// Neoffice — added file (no upstream equivalent): how our send_email attaches PDFs of ERPNext documents. -->
 # Email avec Pièces Jointes PDF
 
 Cette fonctionnalité permet d'envoyer des emails avec des documents ERPNext joints en PDF (factures, devis, commandes, etc.).

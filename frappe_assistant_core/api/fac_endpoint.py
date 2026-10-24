@@ -21,6 +21,8 @@ Custom MCP implementation that properly handles JSON serialization
 and integrates seamlessly with Frappe's existing tool infrastructure.
 """
 
+from typing import Optional
+
 import frappe
 from frappe import _
 
@@ -51,34 +53,149 @@ def _check_assistant_enabled(user: str) -> bool:
         return False
 
 
-def _import_tools():
-    """Import and register all enabled tools from plugin manager."""
+# Only these JSON-RPC methods touch a tool, so only they need the registry built.
+_REGISTRY_METHODS = frozenset({"tools/list", "tools/call"})
+
+
+def _build_tool_registry():
+    """
+    Build a per-request tool registry for the current user.
+
+    Returns a fresh ``OrderedDict`` (name -> tool_dict) built on the call stack
+    rather than mutating the module-level ``mcp`` instance. This keeps
+    concurrent MCP requests isolated from each other: one in-flight request can
+    no longer clear or overwrite the tool set another request is validating or
+    executing against (issue #197). The set is also genuinely per-user, since
+    ``get_available_tools`` filters by the requesting user's permissions.
+
+    Each tool dict carries MCP annotation hints derived from its FAC tool
+    category, so MCP clients (e.g. Claude Desktop) can group tools into
+    Read-only vs Write/delete instead of an undifferentiated "Other tools"
+    bucket. The category is the same one shown/overridable on the FAC admin
+    page (FAC Tool Configuration.tool_category) — single source of truth.
+
+    Tools from FAC-Cloud-only plugins are dropped unless FAC Cloud is the caller.
+    The filter belongs here and not in the registry: the registry answers "what
+    may this *user* access", which FAC Chat's own tool-preferences UI asks over a
+    session cookie, while this answers "what may this *caller* see". Dropping a
+    tool here also makes it uninvokable, because ``_handle_tools_call`` refuses
+    any name absent from the registry it was handed — one gate, not two.
+
+    Returns:
+        OrderedDict mapping tool name to its MCP tool dict.
+    """
+    from collections import OrderedDict
+
+    registry_dict = OrderedDict()
     try:
         from frappe_assistant_core.core.tool_registry import get_tool_registry
-        from frappe_assistant_core.mcp.tool_adapter import register_base_tool
+        from frappe_assistant_core.mcp.tool_adapter import build_tool_dict
+        from frappe_assistant_core.utils.mcp_caller import request_is_from_fac_cloud
+        from frappe_assistant_core.utils.plugin_manager import get_plugin_manager
+        from frappe_assistant_core.utils.tool_category_detector import category_to_annotations
 
-        # Clear existing tools to avoid duplicates on subsequent requests
-        # This is necessary because mcp is a module-level global instance
-        mcp._tool_registry.clear()
-
-        # Get available tools (respects enabled/disabled state and permissions)
+        # Get available instances in one pass. The previous metadata -> name ->
+        # get_tool loop rediscovered every external hook tool for every item.
         registry = get_tool_registry()
-        available_tools = registry.get_available_tools(user=frappe.session.user)
+        available_tools = registry.get_available_tool_instances(user=frappe.session.user)
 
-        # Register each enabled tool with MCP server
-        tool_count = 0
-        for tool_metadata in available_tools:
-            tool_name = tool_metadata.get("name")
-            if tool_name:
-                tool_instance = registry.get_tool(tool_name)
-                if tool_instance:
-                    register_base_tool(mcp, tool_instance)
-                    tool_count += 1
+        if not request_is_from_fac_cloud():
+            for tool_name in get_plugin_manager().get_fac_cloud_only_tools():
+                available_tools.pop(tool_name, None)
 
-        frappe.logger().info(f"Registered {tool_count} enabled tools for user {frappe.session.user}")
+        # Resolve each tool's category once (honors admin overrides stored on
+        # FAC Tool Configuration; falls back to auto-detection).
+        categories = _resolve_tool_categories(list(available_tools), registry, tool_instances=available_tools)
+
+        for tool_name, tool_instance in available_tools.items():
+            tool_dict = build_tool_dict(tool_instance)
+            annotations = category_to_annotations(categories.get(tool_name, "read_write"))
+            if annotations:
+                # Merge with any annotations the tool already declared.
+                tool_dict["annotations"] = {**(tool_dict.get("annotations") or {}), **annotations}
+            registry_dict[tool_name] = tool_dict
+
+        frappe.logger().info(f"Built {len(registry_dict)} enabled tools for user {frappe.session.user}")
 
     except Exception as e:
         frappe.log_error(title="Tool Import Error", message=f"Error importing tools: {str(e)}")
+
+    return registry_dict
+
+
+def _resolve_tool_categories(tool_names: list, registry, tool_instances=None) -> dict:
+    """
+    Resolve the FAC tool category for each tool name.
+
+    Resolution order per tool:
+      1. Stored ``FAC Tool Configuration.tool_category`` (honors admin override).
+      2. Auto-detected category via ``detect_tool_category`` (no config row yet).
+      3. ``"read_write"`` fallback (maps to no annotation hints — safe default).
+
+    Stored categories are batch-fetched in one query to avoid a DB read per tool.
+
+    Args:
+        tool_names: Tool names to resolve.
+        registry: The tool registry (used to fetch instances for auto-detection).
+
+    Returns:
+        Dict mapping tool name -> category string.
+    """
+    from frappe_assistant_core.utils.tool_category_detector import detect_tool_category
+
+    categories = {}
+
+    # 1. Batch-fetch stored categories.
+    try:
+        rows = frappe.get_all(
+            "FAC Tool Configuration",
+            filters={"tool_name": ["in", tool_names]} if tool_names else {},
+            fields=["tool_name", "tool_category"],
+            ignore_permissions=True,
+        )
+        for row in rows:
+            if row.get("tool_category"):
+                categories[row["tool_name"]] = row["tool_category"]
+    except Exception as e:
+        frappe.logger().warning(f"Could not batch-fetch tool categories: {e}")
+
+    # 2 & 3. Fill gaps via auto-detection, defaulting to read_write.
+    for tool_name in tool_names:
+        if tool_name in categories:
+            continue
+        try:
+            tool_instance = (tool_instances or {}).get(tool_name) or registry.get_tool(tool_name)
+            categories[tool_name] = detect_tool_category(tool_instance) if tool_instance else "read_write"
+        except Exception:
+            categories[tool_name] = "read_write"
+
+    return categories
+
+
+def _requested_mcp_method() -> Optional[str]:
+    """Return the JSON-RPC method of the current request, or None if there is none.
+
+    Parsed the way ``MCPServer.handle()`` parses it — ``force=True``, so the
+    Content-Type header is ignored — because the two must never disagree. A
+    client that posts without ``application/json`` is still dispatched there; a
+    guard that failed to see the method would skip the per-request registry,
+    leaving ``handle()`` to fall back to the empty shared one and answer
+    ``tools/list`` with no tools and no error.
+    """
+    request = getattr(frappe.local, "request", None)
+    if request is None:
+        return None
+
+    try:
+        payload = request.get_json(force=True, silent=True)
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    method = payload.get("method")
+    return method if isinstance(method, str) else None
 
 
 def _authenticate_mcp_request():
@@ -93,8 +210,9 @@ def _authenticate_mcp_request():
         str: Authenticated username
         None: Authentication failed (returns 401 response directly)
     """
-    from frappe.oauth import get_server_url
     from werkzeug.wrappers import Response
+
+    from frappe_assistant_core.api.oauth_discovery import get_public_base_url
 
     auth_header = frappe.request.headers.get("Authorization", "")
 
@@ -122,14 +240,15 @@ def _authenticate_mcp_request():
                 raise frappe.AuthenticationError("Token has expired")
 
             # Set the user session
+            # nosemgrep: frappe-setuser — user resolved from validated, non-expired OAuth bearer token
             frappe.set_user(bearer_token.user)
             frappe.logger().info(f"OAuth token validated successfully for user: {bearer_token.user}")
             return bearer_token.user
 
         except frappe.DoesNotExistError:
-            frappe.logger().error(f"OAuth Bearer Token not found for access_token: {token[:20]}...")
+            frappe.logger().error("OAuth Bearer Token not found")
             # Token not found - return 401
-            frappe_url = get_server_url()
+            frappe_url = get_public_base_url()
             metadata_url = f"{frappe_url}/.well-known/oauth-protected-resource"
 
             response = Response()
@@ -150,7 +269,7 @@ def _authenticate_mcp_request():
             frappe.log_error(title="OAuth Token Validation Error", message=f"{type(e).__name__}: {str(e)}")
 
             # Return 401 for invalid/expired tokens
-            frappe_url = get_server_url()
+            frappe_url = get_public_base_url()
             metadata_url = f"{frappe_url}/.well-known/oauth-protected-resource"
 
             response = Response()
@@ -172,7 +291,7 @@ def _authenticate_mcp_request():
             token_part = auth_header[6:]  # Remove "token " prefix
             if ":" in token_part:
                 api_key, api_secret = token_part.split(":", 1)
-                frappe.logger().debug(f"Attempting API key authentication for key: {api_key[:10]}...")
+                frappe.logger().debug("Attempting API key authentication")
 
                 # Validate using database lookup
                 user_data = frappe.db.get_value(
@@ -188,6 +307,7 @@ def _authenticate_mcp_request():
 
                     if api_secret == decrypted_secret:
                         # Set user context for this request
+                        # nosemgrep: frappe-setuser — user authenticated via API key:secret comparison above
                         frappe.set_user(str(user))
                         frappe.logger().info(f"API key authentication successful for user: {user}")
                         return str(user)
@@ -195,7 +315,7 @@ def _authenticate_mcp_request():
                         frappe.logger().warning("API secret mismatch")
                         raise frappe.AuthenticationError("Invalid API credentials")
                 else:
-                    frappe.logger().warning(f"API key not found: {api_key[:10]}...")
+                    frappe.logger().warning("API key not found")
                     raise frappe.AuthenticationError("Invalid API credentials")
             else:
                 frappe.logger().warning("Invalid API key format - missing colon separator")
@@ -203,13 +323,13 @@ def _authenticate_mcp_request():
 
         except frappe.AuthenticationError as e:
             # Return 401 for invalid API credentials
-            frappe_url = get_server_url()
+            frappe_url = get_public_base_url()
             metadata_url = f"{frappe_url}/.well-known/oauth-protected-resource"
 
             response = Response()
             response.status_code = 401
             response.headers["WWW-Authenticate"] = (
-                f'Bearer realm="Frappe Assistant Core", ' f'resource_metadata="{metadata_url}"'
+                f'Bearer realm="Frappe Assistant Core", resource_metadata="{metadata_url}"'
             )
             response.headers["Content-Type"] = "application/json"
             response.data = frappe.as_json({"error": "invalid_credentials", "message": str(e)})
@@ -220,13 +340,13 @@ def _authenticate_mcp_request():
             frappe.log_error(title="API Key Authentication Error", message=f"{type(e).__name__}: {str(e)}")
 
             # Return 401 for other errors
-            frappe_url = get_server_url()
+            frappe_url = get_public_base_url()
             metadata_url = f"{frappe_url}/.well-known/oauth-protected-resource"
 
             response = Response()
             response.status_code = 401
             response.headers["WWW-Authenticate"] = (
-                f'Bearer realm="Frappe Assistant Core", ' f'resource_metadata="{metadata_url}"'
+                f'Bearer realm="Frappe Assistant Core", resource_metadata="{metadata_url}"'
             )
             response.headers["Content-Type"] = "application/json"
             response.data = frappe.as_json({"error": "authentication_error", "message": str(e)})
@@ -234,13 +354,13 @@ def _authenticate_mcp_request():
 
     # No valid authentication method found
     frappe.logger().warning("No valid authentication method found in request")
-    frappe_url = get_server_url()
+    frappe_url = get_public_base_url()
     metadata_url = f"{frappe_url}/.well-known/oauth-protected-resource"
 
     response = Response()
     response.status_code = 401
     response.headers["WWW-Authenticate"] = (
-        f'Bearer realm="Frappe Assistant Core", ' f'resource_metadata="{metadata_url}"'
+        f'Bearer realm="Frappe Assistant Core", resource_metadata="{metadata_url}"'
     )
     response.headers["Content-Type"] = "application/json"
     response.data = frappe.as_json({"error": "unauthorized", "message": "Authentication required"})
@@ -256,25 +376,26 @@ def handle_mcp():
     MCP server implementation which properly handles JSON serialization.
 
     Endpoint: /api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp
-    Protocol: MCP 2025-03-26 StreamableHTTP
+    Protocol: MCP 2025-06-18 StreamableHTTP
 
     Supports two authentication methods:
     1. OAuth 2.0 Bearer tokens: "Authorization: Bearer <token>" (for web clients)
     2. API Key/Secret: "Authorization: token <api_key>:<api_secret>" (for STDIO clients)
     """
-    from frappe.oauth import get_server_url
     from werkzeug.wrappers import Response
+
+    from frappe_assistant_core.api.oauth_discovery import get_public_base_url
 
     # Handle HEAD request for connectivity check (Claude Web uses this)
     if frappe.request.method == "HEAD":
         # Return 401 with WWW-Authenticate header to indicate auth is required
-        frappe_url = get_server_url()
+        frappe_url = get_public_base_url()
         metadata_url = f"{frappe_url}/.well-known/oauth-protected-resource"
 
         response = Response()
         response.status_code = 401
         response.headers["WWW-Authenticate"] = (
-            f'Bearer realm="Frappe Assistant Core", ' f'resource_metadata="{metadata_url}"'
+            f'Bearer realm="Frappe Assistant Core", resource_metadata="{metadata_url}"'
         )
         return response
 
@@ -288,14 +409,24 @@ def handle_mcp():
     # Authentication successful - auth_result is the username
     authenticated_user = auth_result
 
+    # Conversation this call belongs to, when the caller is AR. Browser tools
+    # read it to reach the one tab that asked; absent, they fall back to the
+    # user room (every tab).
+    frappe.local.ar_session_id = frappe.request.headers.get("X-AR-Session-Id") or None
+
     # Check if user has assistant access enabled
     if not _check_assistant_enabled(authenticated_user):
         frappe.throw(
             _("Assistant access is disabled for user {0}").format(authenticated_user), frappe.PermissionError
         )
 
-    # Import tools (they auto-register via decorators)
-    _import_tools()
+    # initialize, ping, prompts/* and resources/* never touch a tool, so they
+    # skip importing and permission-checking the whole tool portfolio. Returning
+    # None makes the wrapper fall through to the shared registry, which is only
+    # correct for methods that never read it.
+    if _requested_mcp_method() not in _REGISTRY_METHODS:
+        return None
 
-    # Return None to let the decorator continue with MCP handling
-    return None
+    # Build a per-request tool registry (isolated from concurrent requests) and
+    # hand it back to the MCP server wrapper, which passes it into handle().
+    return _build_tool_registry()

@@ -28,6 +28,85 @@ from frappe import _
 
 from frappe_assistant_core.core.base_tool import BaseTool
 
+#: Most rows run_database_query returns, whatever LIMIT the query names.
+HARD_ROW_CAP = 1000
+
+# Word sequences refused anywhere in a query: they write files, take locks or
+# change privileges and session state. Matched against whole words from
+# _sql_words(), so identifiers like granted_on or set_name never match.
+_FORBIDDEN_PHRASES = (
+    ("INTO", "OUTFILE"),
+    ("INTO", "DUMPFILE"),
+    ("LOAD", "DATA"),
+    ("LOAD", "XML"),
+    ("LOAD_FILE",),
+    ("GRANT",),
+    ("REVOKE",),
+    ("LOCK", "TABLES"),
+    ("LOCK", "TABLE"),
+    ("UNLOCK", "TABLES"),
+    ("UNLOCK", "TABLE"),
+    ("LOCK", "IN", "SHARE", "MODE"),
+    ("FOR", "UPDATE"),
+    ("FOR", "SHARE"),
+    ("INTO",),
+    ("SET",),
+    ("CALL",),
+)
+
+
+def _find_forbidden_phrase(query: str) -> str | None:
+    """Return the first forbidden phrase in the query, or None.
+
+    A `quoted` name is never a keyword, except LOAD_FILE: MariaDB resolves a
+    backticked name followed by "(" to the built-in function. Other quoted
+    names and numbers only keep their place so they break phrase adjacency.
+    """
+    words = []
+    for _start, _end, kind, text in _sql_lex(query):
+        if kind == "word":
+            words.append(text.upper())
+        elif kind == "quoted":
+            words.append("LOAD_FILE" if text.upper() == "LOAD_FILE" else "`")
+        elif kind == "number":
+            words.append("0")
+    for index in range(len(words)):
+        for phrase in _FORBIDDEN_PHRASES:
+            if tuple(words[index : index + len(phrase)]) == phrase:
+                return " ".join(phrase)
+    if ":=" in _mask_sql(query):
+        return ":="
+    return None
+
+
+# A LIMIT clause at the very end of the statement: "LIMIT n", "LIMIT m, n" or
+# "LIMIT n OFFSET m". A LIMIT anywhere else belongs to a subquery or a UNION
+# branch and does not bound the result. Matched against _mask_sql() output, so
+# a LIMIT inside a comment or a string literal never matches.
+_TRAILING_LIMIT_RE = re.compile(
+    r"\bLIMIT\s+(?:\d+\s*,\s*)?(?P<count>\d+)(?:\s+OFFSET\s+\d+)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _cap_query(query: str, limit: int) -> tuple[str, int]:
+    """Return the statement to run and how many of its rows to keep.
+
+    A trailing LIMIT up to HARD_ROW_CAP is honoured; a larger one is clamped.
+    Otherwise "LIMIT limit + 1" goes on a new line, so a trailing "--" comment
+    cannot swallow it. The extra row tells "exactly the cap" from "more than the cap".
+    """
+    query = query.strip().rstrip(";").rstrip()
+    match = _TRAILING_LIMIT_RE.search(_mask_sql(query))
+    if not match:
+        return f"{query}\nLIMIT {limit + 1}", limit
+
+    requested = int(match.group("count"))
+    if requested <= HARD_ROW_CAP:
+        return query, requested
+    start, end = match.span("count")
+    return f"{query[:start]}{HARD_ROW_CAP + 1}{query[end:]}", HARD_ROW_CAP
+
 
 class QueryAndAnalyse(BaseTool):
     """
@@ -44,7 +123,11 @@ class QueryAndAnalyse(BaseTool):
         super().__init__()
         self.name = "run_database_query"
         self.description = self._get_description()
-        self.requires_permission = None  # Permission checked dynamically in execute method
+        self.requires_permission = None
+        # Raw SQL bypasses User Permissions, so it is restricted to System Manager,
+        # who already has full read access to the site. Enforced by the registry
+        # (listing + execute) and re-checked below. See docs/ for the rationale.
+        self.required_roles = ["System Manager"]
 
         self.inputSchema = {
             "type": "object",
@@ -74,8 +157,8 @@ class QueryAndAnalyse(BaseTool):
                 "limit": {
                     "type": "integer",
                     "default": 100,
-                    "maximum": 1000,
-                    "description": "Maximum number of rows to return",
+                    "maximum": HARD_ROW_CAP,
+                    "description": "Rows to return when the query has no LIMIT of its own (default 100). No query returns more than 1000 rows, whatever its LIMIT.",
                 },
             },
             "required": ["query"],
@@ -83,14 +166,14 @@ class QueryAndAnalyse(BaseTool):
 
     def _get_description(self) -> str:
         """Get tool description"""
-        return """Execute complex SQL queries with joins and perform data analysis. Restricted to SELECT statements only. Requires System Manager role for security. Provides query validation, optimization suggestions, and statistical analysis of results."""
+        return """Execute complex SQL queries with joins and perform data analysis. Restricted to SELECT statements only. Requires System Manager role for security. Results are NOT filtered by User Permissions — when the answer should reflect what the user may see, use run_python_code or list_documents instead. Provides query validation, optimization suggestions, and statistical analysis of results."""
 
     def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute query and analyze results"""
         try:
-            # Check permissions - requires System Manager role
-            user_roles = frappe.get_roles()
-            if "System Manager" not in user_roles:
+            # System Manager is enforced by the registry via self.required_roles;
+            # re-check here so a direct call to execute() is also gated.
+            if "System Manager" not in frappe.get_roles():
                 return {
                     "success": False,
                     "error": "Insufficient permissions. System Manager role required for query execution.",
@@ -101,7 +184,10 @@ class QueryAndAnalyse(BaseTool):
             validate_query = arguments.get("validate_query", True)
             format_results = arguments.get("format_results", True)
             include_schema_info = arguments.get("include_schema_info", False)
-            limit = min(arguments.get("limit", 100), 1000)  # Cap at 1000 rows
+            try:
+                limit = max(1, min(int(arguments.get("limit", 100)), HARD_ROW_CAP))
+            except (TypeError, ValueError):
+                limit = 100
 
             # Validate query security
             validation_result = self._validate_query_security(query)
@@ -129,7 +215,15 @@ class QueryAndAnalyse(BaseTool):
                 "execution_time_ms": execution_result.get("execution_time_ms", 0),
                 "data": execution_result["data"] if format_results else execution_result["raw_data"],
                 "analysis": analysis_result,
+                "truncated": execution_result["truncated"],
+                "row_cap": execution_result["row_cap"],
             }
+
+            if execution_result["truncated"]:
+                response["message"] = _(
+                    "Showing the first {0} rows; the query matched more. "
+                    "Aggregate in SQL (GROUP BY, SUM, COUNT) or narrow the WHERE clause."
+                ).format(execution_result["row_cap"])
 
             if optimization_suggestions:
                 response["optimization_suggestions"] = optimization_suggestions
@@ -146,6 +240,11 @@ class QueryAndAnalyse(BaseTool):
 
     def _validate_query_security(self, query: str) -> Dict[str, Any]:
         """Validate query for security - only SELECT statements allowed"""
+        # MariaDB executes the body of /*! ... */ and /*M! ... */ comments, so the
+        # comment-stripped text checked below would not be what actually runs.
+        if re.search(r"/\*\s*M?!", query, re.IGNORECASE):
+            return {"is_valid": False, "error": "Executable comments (/*! ... */) are not allowed."}
+
         query_upper = query.upper().strip()
 
         # Remove comments and extra whitespace
@@ -155,6 +254,15 @@ class QueryAndAnalyse(BaseTool):
         # Check if it starts with SELECT
         if not query_clean.startswith("SELECT"):
             return {"is_valid": False, "error": "Only SELECT queries are allowed for security reasons."}
+
+        forbidden = _find_forbidden_phrase(query)
+        if forbidden:
+            return {
+                "is_valid": False,
+                "error": _("Query contains forbidden statement: {0}. Only plain SELECT is allowed.").format(
+                    forbidden
+                ),
+            }
 
         # Check for dangerous keywords
         dangerous_keywords = [
@@ -186,6 +294,20 @@ class QueryAndAnalyse(BaseTool):
                 "error": "Multiple statements not allowed. Please execute one SELECT query at a time.",
             }
 
+        # Block Frappe's internal tables (__Auth holds password hashes,
+        # __global_search, __UserSettings, …). They begin with a double underscore;
+        # DocType tables are `tab...`. Tokenised like MariaDB, so comments and
+        # string literals cannot hide or fake a name. An alias written `AS __x`
+        # names a column, not a table, and is allowed.
+        tokens = list(_sql_words(query))
+        for index, token in enumerate(tokens):
+            if token.startswith("__") and not (index and tokens[index - 1].upper() == "AS"):
+                return {
+                    "is_valid": False,
+                    "error": "Access to Frappe internal tables (those prefixed with '__') is not allowed. "
+                    "Query DocType tables (tab*) instead.",
+                }
+
         return {"is_valid": True}
 
     def _execute_query(self, query: str, limit: int) -> Dict[str, Any]:
@@ -195,19 +317,19 @@ class QueryAndAnalyse(BaseTool):
 
             start_time = time.time()
 
-            # Add LIMIT if not present and within bounds
-            if "LIMIT" not in query.upper():
-                query = f"{query.rstrip(';')} LIMIT {limit}"
-
-            # Execute query
-            result = frappe.db.sql(query, as_dict=True)
+            capped_query, row_cap = _cap_query(query, limit)
+            result = frappe.db.sql(capped_query, as_dict=True)
 
             execution_time = (time.time() - start_time) * 1000  # Convert to milliseconds
 
+            truncated = len(result) > row_cap
+            result = result[:row_cap]
             return {
                 "success": True,
                 "data": result,
                 "raw_data": result,  # Keep original for non-formatted output
+                "truncated": truncated,
+                "row_cap": row_cap,
                 "execution_time_ms": round(execution_time, 2),
             }
 
@@ -290,7 +412,11 @@ class QueryAndAnalyse(BaseTool):
         return suggestions
 
     def _get_schema_info(self, query: str) -> Dict[str, Any]:
-        """Extract schema information for tables used in query"""
+        """Extract schema information for tables used in query.
+
+        Uses `frappe.db.get_table_columns_description` so the table name
+        never appears interpolated into raw SQL from this module.
+        """
         try:
             # Extract table names from query (basic implementation)
             tables = re.findall(r"FROM\s+`?(\w+)`?|JOIN\s+`?(\w+)`?", query, re.IGNORECASE)
@@ -301,8 +427,7 @@ class QueryAndAnalyse(BaseTool):
             schema_info = {}
             for table in table_names:
                 try:
-                    # Get column information
-                    columns = frappe.db.sql(f"DESCRIBE `{table}`", as_dict=True)
+                    columns = frappe.db.get_table_columns_description(table)
                     schema_info[table] = {"columns": columns, "total_columns": len(columns)}
                 except Exception as e:
                     schema_info[table] = {"error": f"Could not retrieve schema: {str(e)}"}
@@ -315,3 +440,96 @@ class QueryAndAnalyse(BaseTool):
 
 # Make sure class name matches file name for discovery
 query_and_analyse = QueryAndAnalyse
+
+
+_SQL_WHITESPACE = " \t\r\n\f\v"
+
+# MariaDB ends a number after its fraction and exponent, so "1e1INTO" is the
+# number 1e1 followed by the word INTO. Digits followed directly by letters
+# without a valid exponent ("1abc") are an identifier and stay one word.
+_NUMBER_RE = re.compile(r"\d+\.\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|\d+[eE][+-]?\d+")
+
+
+def _sql_words(query: str):
+    """Yield bare words and `quoted` identifiers outside string literals and comments."""
+    for _start, _end, kind, text in _sql_lex(query):
+        if kind in ("word", "quoted"):
+            yield text
+
+
+def _mask_sql(query: str) -> str:
+    """Return the query with string literals and comments blanked out, same length.
+
+    Positions in the result line up with the original, so a match found here can
+    be applied to the query itself.
+    """
+    chars = list(query)
+    for start, end, kind, _text in _sql_lex(query):
+        if kind in ("string", "comment"):
+            chars[start:end] = " " * (end - start)
+    return "".join(chars)
+
+
+def _sql_lex(query: str):
+    """Yield (start, end, kind, text) spans of SQL tokens, following MariaDB's lexer.
+
+    Kinds: "word" (bare word), "number" (numeric literal prefix), "quoted" (`identifier`, text unescaped), "string"
+    ('...' or "..." with backslash and doubled-quote escapes) and "comment" (#,
+    "-- " and /* */). A "--" not followed by whitespace is not a comment in MariaDB,
+    so it is not treated as one. Other characters are skipped.
+    """
+    i, n = 0, len(query)
+    while i < n:
+        char = query[i]
+        if char in "'\"":
+            j = i + 1
+            while j < n:
+                if query[j] == "\\":
+                    j += 2
+                    continue
+                if query[j] == char:
+                    if j + 1 < n and query[j + 1] == char:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            end = min(j + 1, n)
+            yield i, end, "string", query[i:end]
+            i = end
+        elif char == "`":
+            j, name = i + 1, []
+            while j < n:
+                if query[j] == "`":
+                    if j + 1 < n and query[j + 1] == "`":
+                        name.append("`")
+                        j += 2
+                        continue
+                    break
+                name.append(query[j])
+                j += 1
+            end = min(j + 1, n)
+            yield i, end, "quoted", "".join(name)
+            i = end
+        elif char == "#" or (query.startswith("--", i) and (i + 2 == n or query[i + 2] in _SQL_WHITESPACE)):
+            newline = query.find("\n", i)
+            end = n if newline == -1 else newline + 1
+            yield i, end, "comment", query[i:end]
+            i = end
+        elif query.startswith("/*", i):
+            close = query.find("*/", i + 2)
+            end = n if close == -1 else close + 2
+            yield i, end, "comment", query[i:end]
+            i = end
+        elif (
+            char.isdigit() or (char == "." and not (i and (query[i - 1].isalnum() or query[i - 1] in "_$`")))
+        ) and (number := _NUMBER_RE.match(query, i)):
+            yield i, number.end(), "number", number.group()
+            i = number.end()
+        elif char.isalnum() or char in "_$":
+            j = i
+            while j < n and (query[j].isalnum() or query[j] in "_$"):
+                j += 1
+            yield i, j, "word", query[i:j]
+            i = j
+        else:
+            i += 1

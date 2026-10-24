@@ -24,45 +24,68 @@ from typing import Any, Dict
 import frappe
 from frappe import _
 
-from frappe_assistant_core.core.base_tool import BaseTool
+from frappe_assistant_core.core.base_tool import BaseTool, exception_message, permission_error_result
+from frappe_assistant_core.utils.customisation import (
+    customisation_result,
+    desk_url,
+    script_report_warning,
+    server_script_guard,
+)
+from frappe_assistant_core.utils.savepoint import (
+    open_savepoint,
+    release_savepoint,
+    rollback_to_savepoint,
+)
+
+from .child_tables import ChildRowError, child_table_fields, normalize_child_rows, restricted_row_keys
+
+# The submit after a create runs inside this savepoint, so a refused submit leaves the draft.
+_SUBMIT_SAVEPOINT = "fac_create_document_submit"
+# A validate_only dry run is rolled back to this savepoint.
+_VALIDATE_SAVEPOINT = "fac_create_document_validate"
 
 
-# //// Neoffice — added functions (no upstream equivalent), maintenance#1366. Upstream compared the
-# //// DocType's required fields with what the caller sent, BEFORE the document was built. A quotation was
-# //// refused for "conversion_rate, price_list_currency, plc_conversion_rate" although ERPNext fills all
-# //// three itself (validate fills the first, set_missing_values the three), and a legitimate 0 or False
-# //// counted as missing. The check now asks the completed document, with Frappe's own list of missing
-# //// mandatory fields.
-def complete_document(doc):
-    """Let the document fill what it computes itself, as the desk does before a save.
+def _default_todo_allocation(doc: Any) -> None:
+    """Allocate a ToDo that names nobody to the session user, if Frappe would refuse it otherwise.
 
-    Returns False when it could not (an unknown item, say): the caller then lets validate and insert
-    report the real cause rather than claim that a field is missing.
+    Before Frappe v16.32.0 / v15.119.0, a user may create a ToDo only when it names them
+    (``allocated_to`` or ``assigned_by`` is that user), unless they hold a role, such as
+    System Manager, that grants ToDo create. A non-admin user's plain "add a ToDo" therefore
+    has to be a personal one; a ToDo Frappe already accepts is left exactly as it was written.
+
+    From those releases the function changes nothing: frappe/frappe#41869 added
+    ``or doc.owner == user`` to that rule, and a user owns every document they create.
     """
-    try:
-        doc.run_method("set_missing_values")
-    except Exception:
-        return False
-    return True
+    if doc.doctype != "ToDo" or doc.allocated_to or doc.assigned_by:
+        return
+
+    if not doc.has_permission("create"):
+        doc.allocated_to = frappe.session.user
 
 
-# //// Neoffice — maintenance#1366, second defect in the same check. Frappe lists `parent` and `parenttype`
-# //// as missing on every row of a table, because insert() writes them AFTER the document is named: before
-# //// it they are always empty. The first version of the check reported them, so no document with a table
-# //// (a quotation, a contact with its e-mails) could be created: "Missing required fields: parent".
-ROW_FIELDS_SET_BY_INSERT = ("parent", "parenttype")
+def _prepare_for_insert(doc: Any) -> None:
+    """Run the steps ``Document.insert`` takes before ``validate``, in its order, without the insert.
 
-
-def missing_required_fields(doc):
-    """Names of the mandatory fields still empty on the document and on its rows."""
-    missing = [fieldname for fieldname, _message in doc._get_missing_mandatory_fields()]
-    for row in doc.get_all_children():
-        missing.extend(
-            fieldname
-            for fieldname, _message in row._get_missing_mandatory_fields()
-            if fieldname not in ROW_FIELDS_SET_BY_INSERT
-        )
-    return list(dict.fromkeys(missing))
+    Controllers rely on them: Custom Field sets its fieldname in before_insert, and naming
+    fills ``doc.name`` and the child rows' parents. check_if_latest sets the ``_action`` that
+    link validation reads; the caller has already run check_permission. The methods exist on
+    Frappe v15 and v16. The caller rolls back, which undoes the naming-series and naming-rule
+    counters. It does not undo an autoincrement sequence: NEXTVAL is not transactional, so a
+    dry run on an autoincrement doctype uses up one id, as a failed real insert does.
+    """
+    doc._set_defaults()
+    doc.set_user_and_timestamp()
+    doc.set_docstatus()
+    doc.check_if_latest()
+    doc._validate_links()
+    doc.run_method("before_insert")
+    doc.set_new_name()
+    doc.set_parent_in_children()
+    doc.validate_higher_perm_levels()
+    doc.flags.in_insert = True
+    # run_before_save_methods would also run before_save, which a dry run must not.
+    if doc._action in ("save", "submit"):
+        doc.run_method("before_validate")
 
 
 class DocumentCreate(BaseTool):
@@ -79,7 +102,7 @@ class DocumentCreate(BaseTool):
     def __init__(self):
         super().__init__()
         self.name = "create_document"
-        self.description = "Create new Frappe documents with proper validation and child table support. Supports all DocTypes including those with child tables. WORKFLOW: First use get_doctype_info to understand the DocType structure, identify required fields and child tables, then create the document with proper field values. Child tables must be provided as arrays of objects. Referenced records (customers, items, warehouses, etc.) must already exist in the system. Use exact field names as shown in DocType metadata. Error responses include specific guidance for resolution. Common use cases: creating Sales Orders with line items, Purchase Orders with items and taxes, customer records, inventory transactions."
+        self.description = "Create new Frappe documents with proper validation and child table support. Supports all DocTypes including those with child tables. WORKFLOW: First use get_doctype_info to understand the DocType structure, identify required fields and child tables, then create the document with proper field values. Child tables must be provided as arrays of objects; a Table MultiSelect field also accepts an array of its link values (e.g. ['user@example.com']). Referenced records (customers, items, warehouses, etc.) must already exist in the system. Use exact field names as shown in DocType metadata. Error responses include specific guidance for resolution. Common use cases: creating Sales Orders with line items, Purchase Orders with items and taxes, customer records, inventory transactions."
         self.requires_permission = None  # Permission checked dynamically per DocType
 
         self.inputSchema = {
@@ -96,12 +119,12 @@ class DocumentCreate(BaseTool):
                 "submit": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Whether to submit the document after creation (for submittable doctypes like Sales Invoice). Use true only when explicitly requested.",
+                    "description": "Whether to submit the document after creation (for submittable doctypes like Sales Invoice). Use true only when explicitly requested. If the DocType has an active Workflow, the document is created as a draft instead; move it on with run_workflow.",
                 },
                 "validate_only": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Only validate the document without saving it. Use this to test data format and required fields before actual creation.",
+                    "description": "Run the document's validation without saving. Checks permissions and validation rules; it does not check mandatory fields.",
                 },
             },
             "required": ["doctype", "data"],
@@ -114,35 +137,10 @@ class DocumentCreate(BaseTool):
         submit = arguments.get("submit", False)
         validate_only = arguments.get("validate_only", False)
 
-        # Normalize common LLM mistakes in DocType names
-        DOCTYPE_NORMALIZATION = {
-            "customer object": "Customer",
-            "customer record": "Customer",
-            "supplier object": "Supplier",
-            "supplier record": "Supplier",
-            "item object": "Item",
-            "product": "Item",
-            "invoice": "Sales Invoice",
-            "quote": "Quotation",
-            "order": "Sales Order",
-            "employee record": "Employee",
-            "user object": "User",
-            "contact record": "Contact",
-        }
-
-        if doctype:
-            doctype_lower = doctype.lower()
-            if doctype_lower in DOCTYPE_NORMALIZATION:
-                normalized = DOCTYPE_NORMALIZATION[doctype_lower]
-                frappe.logger().warning(
-                    f"[CREATE_DOCUMENT] Normalized DocType: '{doctype}' → '{normalized}'. "
-                    f"LLM should use exact names from instructions."
-                )
-                doctype = normalized
-
         # Import security validation
         from frappe_assistant_core.core.security_config import (
             filter_sensitive_fields,
+            get_restricted_fields,
             validate_document_access,
         )
 
@@ -152,6 +150,7 @@ class DocumentCreate(BaseTool):
             doctype=doctype,
             name=None,  # No specific document for create operation
             perm_type="create",
+            data=data,
         )
 
         if not validation_result["success"]:
@@ -160,19 +159,8 @@ class DocumentCreate(BaseTool):
         user_role = validation_result["role"]
 
         try:
-            # Filter out sensitive fields that user shouldn't be able to set
-            from frappe_assistant_core.core.security_config import ADMIN_ONLY_FIELDS, SENSITIVE_FIELDS
-
-            # Get restricted fields for this role and doctype
-            restricted_fields = set()
-            restricted_fields.update(SENSITIVE_FIELDS.get("all_doctypes", []))
-            restricted_fields.update(SENSITIVE_FIELDS.get(doctype, []))
-
-            if user_role == "Assistant User":
-                restricted_fields.update(ADMIN_ONLY_FIELDS.get("all_doctypes", []))
-                doctype_admin_fields = ADMIN_ONLY_FIELDS.get(doctype, [])
-                if doctype_admin_fields != "*":
-                    restricted_fields.update(doctype_admin_fields)
+            # Fields this role may not set; child rows are screened against their own doctype below
+            restricted_fields = get_restricted_fields(doctype, user_role)
 
             # Check for attempts to set restricted fields
             restricted_fields_attempted = [field for field in data.keys() if field in restricted_fields]
@@ -215,54 +203,72 @@ class DocumentCreate(BaseTool):
                         # Don't return error, just disable submit
                         submit = False
 
+            # Get DocType metadata for proper field handling. Table and Table MultiSelect
+            # are both child tables; matching only "Table" left a Table MultiSelect value
+            # to be set raw, and the insert failed on .is_new() (#291).
+            meta = frappe.get_meta(doctype)
+            table_fields = child_table_fields(meta)
+
+            # Build and screen every child table before touching the document. Frappe
+            # keeps a new row's own owner and creation, so an unscreened row could
+            # forge them; rows answer to their child doctype's restricted fields.
+            child_rows = {}
+            for field, value in data.items():
+                if field not in table_fields:
+                    continue
+                rows = normalize_child_rows(table_fields[field], value)
+                child_doctype = table_fields[field].options
+                violating = restricted_row_keys(rows, get_restricted_fields(child_doctype, user_role))
+                if violating:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Cannot set restricted child-table fields: {', '.join(violating)} "
+                            f"in {child_doctype}. These fields require higher privileges."
+                        ),
+                        "field": field,
+                    }
+                child_rows[field] = rows
+
+            refusal = server_script_guard(doctype, data)
+            if refusal:
+                return refusal
+
             # Create document
             doc = frappe.new_doc(doctype)
 
-            # Get DocType metadata for proper field handling
-            meta = frappe.get_meta(doctype)
-            table_fields = {f.fieldname: f.options for f in meta.fields if f.fieldtype == "Table"}
-
-            # Set field values with proper child table handling
             for field, value in data.items():
-                if field in table_fields:
-                    # Handle child table fields properly
-                    if isinstance(value, list):
-                        for row_data in value:
-                            if isinstance(row_data, dict):
-                                doc.append(field, row_data)
-                            else:
-                                raise ValueError(
-                                    f"Child table '{field}' requires list of dictionaries, got: {type(row_data)}"
-                                )
-                    else:
-                        raise ValueError(f"Child table '{field}' requires a list, got: {type(value)}")
+                if field in child_rows:
+                    for row in child_rows[field]:
+                        # append writes into the dict it is given; child_rows stays the input
+                        doc.append(field, dict(row))
                 else:
-                    # Handle regular fields
                     setattr(doc, field, value)
 
-            # //// Neoffice — the required-field check moved here from before the document was built (see
-            # //// complete_document). When the document could not complete itself, insert reports why.
-            if complete_document(doc):
-                missing_fields = missing_required_fields(doc)
-                if missing_fields:
-                    required_fields = [
-                        f.fieldname
-                        for f in meta.fields
-                        if f.reqd and not f.default and f.fieldtype != "Table"
-                    ]
-                    return {
-                        "success": False,
-                        "error": f"Missing required fields: {', '.join(missing_fields)}",
-                        "required_fields": required_fields,
-                        "provided_fields": list(data.keys()),
-                        "suggestion": f"Use get_doctype_info tool with doctype='{doctype}' to see all required fields and their types",
-                        "doctype": doctype,
-                    }
+            _default_todo_allocation(doc)
+
+            # Required-field checks are deferred to Frappe's own validation pipeline
+            # via doc.insert()/doc.run_method("validate"). A pre-flight check here is
+            # unreliable: many "reqd" fields (e.g. Quotation.conversion_rate,
+            # price_list_currency, plc_conversion_rate) are populated by the
+            # doctype controller's set_missing_values() during validate(), which has
+            # not yet run when we'd inspect doc.get(f). MandatoryError is caught
+            # below and translated into the same structured error shape.
 
             # Handle validation-only mode
             if validate_only:
-                # Run validation without saving
-                doc.run_method("validate")
+                # validate() can write (a Property Setter deletes its predecessors, a Workflow
+                # deactivates its siblings, scripts and hooks run), so the dry run is undone
+                # whatever the outcome. Work Frappe queued for the commit is unwound with it.
+                marks = open_savepoint(_VALIDATE_SAVEPOINT)
+                try:
+                    # insert() refuses a document this user may not create, so say so here
+                    # instead of reporting a validation the real create would then fail.
+                    doc.check_permission("create")
+                    _prepare_for_insert(doc)
+                    doc.run_method("validate")
+                finally:
+                    rollback_to_savepoint(_VALIDATE_SAVEPOINT, marks, doctype, doc.name)
 
                 return {
                     "success": True,
@@ -274,9 +280,39 @@ class DocumentCreate(BaseTool):
                     "next_step": "Use create_document with validate_only=false to actually create the document",
                 }
 
+            # Capture input child-table values for post-save comparison (issue #181).
+            # The normalized rows, so a Table MultiSelect value compares as its row.
+            input_child_values = child_rows
+
             # Save document
             doc.insert()
-
+            # Check for silently overridden field values
+            warnings = []
+            for field, input_rows in input_child_values.items():
+                saved_rows = doc.get(field) or []
+                for idx, input_row in enumerate(input_rows):
+                    if idx >= len(saved_rows):
+                        break
+                    saved_row = saved_rows[idx]
+                    for key, input_val in input_row.items():
+                        saved_val = getattr(saved_row, key, None)
+                        if saved_val is not None and str(saved_val) != str(input_val):
+                            # Skip numeric false positives (1 vs 1.0, 100 vs 100.0)
+                            try:
+                                if float(str(saved_val)) == float(str(input_val)):
+                                    continue
+                            except (ValueError, TypeError):
+                                pass
+                            warnings.append(
+                                {
+                                    "child_table": field,
+                                    "row_idx": idx,
+                                    "field": key,
+                                    "requested": input_val,
+                                    "saved": str(saved_val),
+                                    "reason": "Value was overridden by ERPNext validation logic",
+                                }
+                            )
             # Initialize result with basic information
             result = {
                 "success": True,
@@ -285,27 +321,53 @@ class DocumentCreate(BaseTool):
                 "docstatus": doc.docstatus,
                 "owner": doc.owner,
                 "creation": str(doc.creation),
+                "url": desk_url(doctype, doc.name),
                 "submitted": False,
                 "can_submit": False,
             }
+            result.update(
+                customisation_result(doctype, doc, script_report_warning(doctype, data, current=doc))
+            )
 
             # Submit if requested and allowed
-            if submit and doc.docstatus == 0:
+            from frappe.model.workflow import get_workflow_name
+
+            workflow_name = get_workflow_name(doctype) if submit and doc.docstatus == 0 else None
+            if workflow_name:
+                # Submitting directly skips the workflow's approval steps: Frappe validates the
+                # workflow before it sets the submitted state. The draft goes through run_workflow.
+                submit_error = (
+                    f"{doctype} has an active Workflow ('{workflow_name}'), so it is submitted "
+                    "through the workflow, not directly"
+                )
+                result["message"] = f"{doctype} '{doc.name}' created as draft. Not submitted: {submit_error}"
+                result["submit_error"] = submit_error
+                result["workflow"] = workflow_name
+                result["suggestion"] = (
+                    f"Use run_workflow on {doctype} '{doc.name}' to move it through its workflow."
+                )
+            elif submit and doc.docstatus == 0:
+                # Frappe writes docstatus=1 before on_submit, so without this a submit refused
+                # partway would be committed as a submitted document with half its postings,
+                # under a message that says it is a draft.
+                marks = open_savepoint(_SUBMIT_SAVEPOINT)
                 try:
                     doc.submit()
+                except Exception as e:
+                    rollback_to_savepoint(_SUBMIT_SAVEPOINT, marks, doctype, doc.name)
+                    doc.reload()
+                    submit_error = exception_message(e)
+                    result["message"] = (
+                        f"{doctype} '{doc.name}' created as draft. Submit failed: {submit_error}"
+                    )
+                    result["submit_error"] = submit_error
+                else:
+                    release_savepoint(_SUBMIT_SAVEPOINT)
                     result["submitted"] = True
                     result["docstatus"] = 1
                     result["message"] = f"{doctype} '{doc.name}' created and submitted successfully"
-                except Exception as e:
-                    result["message"] = f"{doctype} '{doc.name}' created as draft. Submit failed: {str(e)}"
-                    result["submit_error"] = str(e)
             else:
-                # Adapt message based on is_submittable
-                if meta.is_submittable:
-                    result["message"] = f"📄 {doctype} '{doc.name}' created as draft"
-                else:
-                    # Non-submittable DocTypes (Todo, Customer, Item, etc.)
-                    result["message"] = f"📄 {doctype} '{doc.name}' created and saved"
+                result["message"] = f"{doctype} '{doc.name}' created successfully as draft"
 
             # Check if user can submit this document later
             if doc.docstatus == 0:  # Only for draft documents
@@ -318,52 +380,80 @@ class DocumentCreate(BaseTool):
             if hasattr(doc, "workflow_state") and doc.workflow_state:
                 result["workflow_state"] = doc.workflow_state
 
-            # Add useful next steps information (adapt based on is_submittable)
+            # Add useful next steps information
             if doc.docstatus == 0:
-                if meta.is_submittable:
-                    result["next_steps"] = [
-                        "Document is in draft state",
-                        "You can update this document using update_document tool",
-                        f"Submit permission: {'Available' if result['can_submit'] else 'Not available'}",
-                    ]
-                else:
-                    # Non-submittable: no mention of draft/submit
-                    result["next_steps"] = [
-                        "Document is saved",
-                        "You can update this document using update_document tool",
-                    ]
+                result["next_steps"] = [
+                    "Document is in draft state",
+                    "You can update this document using document_update tool",
+                    f"Submit permission: {'Available' if result['can_submit'] else 'Not available'}",
+                ]
             else:
                 result["next_steps"] = [
                     "Document is submitted and cannot be modified",
-                    "Use get_document to view the submitted document",
+                    "Use document_get to view the submitted document",
                 ]
 
-            # CRITICAL: Add pending_document for conversation context (same pattern as email)
-            # Extract a description/title for context
-            doc_description = None
-            for field in ["description", "subject", "title", "item_name", "customer_name", "supplier_name"]:
-                if hasattr(doc, field) and getattr(doc, field):
-                    doc_description = getattr(doc, field)
-                    break
-
-            result["pending_document"] = {
-                "doctype": doctype,
-                "name": doc.name,
-                "action": "created",
-                "is_submittable": meta.is_submittable,
-                "docstatus": doc.docstatus,
-                "description": doc_description or doc.name
-            }
-
             # Log successful creation
+            # Add warnings if any fields were silently overridden
+            if warnings:
+                result["warnings"] = warnings
+
             return result
 
-        except Exception as e:
-            frappe.log_error(
-                title=_("Document Creation Error"), message=f"Error creating {doctype}: {str(e)}"
-            )
-
+        except ChildRowError as e:
+            return {**e.as_result(), "doctype": doctype}
+        except frappe.MandatoryError as e:
+            # Frappe raises MandatoryError after set_missing_values() has run, so the
+            # missing fieldnames here are genuine — not the false positives we'd see
+            # from a pre-flight `reqd`-flag check on the raw input. Format:
+            #   "[<doctype>, <name>]: <fieldname1>, <fieldname2>, ..."
+            # Don't bind `_` here — `_` is the translation function imported at
+            # module scope. Any local `_ = ...` would shadow it for the entire
+            # function body, raising UnboundLocalError at the later `_("...")`
+            # call inside the generic-Exception branch on paths that route
+            # through the function before reaching that local assignment.
             error_msg = str(e)
+            try:
+                fields_part = error_msg.partition(": ")[2]
+                missing = [f.strip() for f in fields_part.split(",") if f.strip()]
+            except Exception:
+                missing = []
+
+            return {
+                "success": False,
+                "error": (
+                    f"Missing required fields: {', '.join(missing)}"
+                    if missing
+                    else f"Missing required fields. Raw error: {error_msg}"
+                ),
+                "error_type": "missing_required_field",
+                "doctype": doctype,
+                "missing_fields": missing,
+                "provided_fields": list(data.keys()),
+                "suggestion": (
+                    f"Use get_doctype_info tool with doctype='{doctype}' to see all required "
+                    f"fields and supply values for: {', '.join(missing)}."
+                    if missing
+                    else f"Use get_doctype_info tool with doctype='{doctype}' to see all required fields."
+                ),
+            }
+        except frappe.PermissionError as e:
+            # Frappe raises this with no message and keeps the reason in
+            # frappe.flags.error_message; exception_message() recovers it.
+            error_msg = exception_message(e, _("Insufficient permission to create {0}").format(doctype))
+            if not validate_only:
+                frappe.log_error(
+                    title=_("Document Creation Error"), message=f"Error creating {doctype}: {error_msg}"
+                )
+
+            return permission_error_result(doctype, error_msg)
+        except Exception as e:
+            error_msg = exception_message(e)
+            # A dry run refused by validation is the answer the caller asked for, not a fault.
+            if not (validate_only and isinstance(e, frappe.ValidationError)):
+                frappe.log_error(
+                    title=_("Document Creation Error"), message=f"Error creating {doctype}: {error_msg}"
+                )
 
             # Provide specific guidance based on error type
             result = {"success": False, "error": error_msg, "doctype": doctype}
@@ -373,9 +463,10 @@ class DocumentCreate(BaseTool):
                 result.update(
                     {
                         "error_type": "child_table_handling_error",
-                        "guidance": "This error occurs when child table data is not properly formatted. Child tables require lists of dictionaries.",
+                        "guidance": "This error occurs when child table data is not properly formatted. Child tables require lists of dictionaries; a Table MultiSelect also accepts a list of its link values.",
                         "suggestion": f"1. Use get_doctype_info tool with doctype='{doctype}' to see child table fields\n2. Ensure child table fields are formatted as lists of dictionaries\n3. Example: {{'items': [{{'item_code': 'ITEM001', 'qty': 10}}]}}",
-                        "child_tables": list(frappe.get_meta(doctype).get_table_fields()) if doctype else [],
+                        # Fieldnames: DocField objects reach the client as their str() repr
+                        "child_tables": list(child_table_fields(frappe.get_meta(doctype))) if doctype else [],
                     }
                 )
             elif "does not exist" in error_msg.lower():
@@ -386,28 +477,8 @@ class DocumentCreate(BaseTool):
                         "suggestion": "1. Verify that referenced records (like customers, items, suppliers) exist\n2. Use search_documents tool to find correct record names\n3. Check spelling and exact names",
                     }
                 )
-            elif (
-                isinstance(e, frappe.MandatoryError)
-                or "mandatory" in error_msg.lower()
-                or "required" in error_msg.lower()
-            ):
-                # //// Neoffice — MandatoryError added: its message is the user's language, so the words
-                # //// "mandatory" and "required" never matched it.
-                result.update(
-                    {
-                        "error_type": "missing_required_field",
-                        "guidance": "Required field is missing or empty.",
-                        "suggestion": f"1. Use get_doctype_info tool with doctype='{doctype}' to see all required fields\n2. Ensure all required fields are provided with valid values",
-                    }
-                )
             elif "permission" in error_msg.lower():
-                result.update(
-                    {
-                        "error_type": "permission_error",
-                        "guidance": "Insufficient permissions for this operation.",
-                        "suggestion": "Contact your system administrator to grant necessary permissions for this DocType",
-                    }
-                )
+                return permission_error_result(doctype, error_msg)
             else:
                 result.update(
                     {

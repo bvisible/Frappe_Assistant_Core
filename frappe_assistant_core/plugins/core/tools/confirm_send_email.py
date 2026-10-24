@@ -14,6 +14,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# //// Neoffice — added file (no upstream equivalent).
+# //// Second step of our draft-then-confirm e-mail flow (send_email creates the Communication draft, this sends it).
+
 """
 Confirm Send Email Tool for Core Plugin.
 Sends a Communication draft that was created by send_email tool.

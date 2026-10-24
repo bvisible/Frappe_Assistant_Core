@@ -23,6 +23,7 @@ import importlib
 import inspect
 import json
 import threading
+import traceback
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -54,6 +55,7 @@ class PluginInfo:
     state: PluginState
     tools: List[str]
     error_message: Optional[str] = None
+    fac_cloud_only: bool = False
 
 
 @dataclass
@@ -88,6 +90,8 @@ class PluginConfig:
     """Plugin system configuration"""
 
     PLUGIN_BASE_PATH = "frappe_assistant_core.plugins"
+    PLUGIN_CONFIG_DOCTYPE = "FAC Plugin Configuration"
+    # Legacy - kept for backward compatibility during migration
     PLUGIN_SETTINGS_DOCTYPE = "Assistant Core Settings"
     PLUGIN_SETTINGS_FIELD = "enabled_plugins_list"
     DISCOVERY_PATTERN = "plugin.py"
@@ -157,19 +161,52 @@ class PluginDiscovery:
                     version=info.get("version", "1.0.0"),
                     state=PluginState.DISCOVERED,
                     tools=plugin_instance.get_tools(),
+                    fac_cloud_only=plugin_instance.is_fac_cloud_only(),
                 )
 
         return None
 
 
 class PluginPersistence:
-    """Handles plugin state persistence"""
+    """Handles plugin state persistence using FAC Plugin Configuration DocType.
+
+    This replaces the old JSON-based approach in Assistant Core Settings with
+    individual DocType records for atomic operations and proper caching.
+    """
 
     def __init__(self):
         self.logger = frappe.logger("plugin_persistence")
 
     def load_enabled_plugins(self) -> Set[str]:
-        """Load enabled plugin names from database"""
+        """Load enabled plugin names from database.
+
+        Uses FAC Plugin Configuration DocType for atomic reads.
+        Falls back to legacy JSON field if DocType doesn't exist yet.
+        """
+        try:
+            # Check if the new DocType table exists
+            if frappe.db.table_exists("tabFAC Plugin Configuration"):
+                # Use the new DocType-based approach (atomic, no JSON parsing)
+                enabled = frappe.get_all(
+                    PluginConfig.PLUGIN_CONFIG_DOCTYPE,
+                    filters={"enabled": 1},
+                    pluck="plugin_name",
+                )
+                return set(enabled)
+            else:
+                # Fallback to legacy JSON field during migration
+                return self._load_from_legacy_json()
+
+        except Exception as e:
+            self.logger.error(f"Failed to load enabled plugins: {e}")
+            # Fallback to legacy on error
+            try:
+                return self._load_from_legacy_json()
+            except Exception:
+                return set()
+
+    def _load_from_legacy_json(self) -> Set[str]:
+        """Load from legacy JSON field in Assistant Core Settings."""
         try:
             settings = frappe.get_single(PluginConfig.PLUGIN_SETTINGS_DOCTYPE)
             enabled_list = getattr(settings, PluginConfig.PLUGIN_SETTINGS_FIELD, None)
@@ -177,14 +214,56 @@ class PluginPersistence:
             if enabled_list:
                 return set(json.loads(enabled_list))
             return set()
-
         except Exception as e:
-            self.logger.error(f"Failed to load enabled plugins: {e}")
+            self.logger.error(f"Failed to load from legacy JSON: {e}")
             return set()
 
-    def save_enabled_plugins(self, enabled_plugins: Set[str]) -> bool:
-        """Save enabled plugin names to database"""
+    def save_plugin_state(self, plugin_name: str, enabled: bool, plugin_info=None) -> bool:
+        """Save a single plugin's enabled state.
+
+        Uses atomic DocType update instead of read-modify-write JSON.
+        """
         try:
+            enabled_int = 1 if enabled else 0
+
+            if frappe.db.exists(PluginConfig.PLUGIN_CONFIG_DOCTYPE, plugin_name):
+                # Update existing record
+                doc = frappe.get_doc(PluginConfig.PLUGIN_CONFIG_DOCTYPE, plugin_name)
+                doc.enabled = enabled_int
+                doc.last_toggled_at = frappe.utils.now()
+                doc.save(ignore_permissions=True)
+            else:
+                # Create new record
+                doc = frappe.new_doc(PluginConfig.PLUGIN_CONFIG_DOCTYPE)
+                doc.plugin_name = plugin_name
+                doc.enabled = enabled_int
+                doc.discovered_at = frappe.utils.now()
+                doc.last_toggled_at = frappe.utils.now()
+
+                # Add plugin info if available
+                if plugin_info:
+                    doc.display_name = getattr(
+                        plugin_info, "display_name", plugin_name.replace("_", " ").title()
+                    )
+                    doc.description = getattr(plugin_info, "description", "")
+
+                doc.insert(ignore_permissions=True)
+
+            frappe.db.commit()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to save plugin state for '{plugin_name}': {e}")
+            return False
+
+    def save_enabled_plugins(self, enabled_plugins: Set[str]) -> bool:
+        """Save enabled plugin names to database.
+
+        DEPRECATED: Use save_plugin_state() for individual plugin updates.
+        This method is kept for backward compatibility.
+        """
+        try:
+            # Also update legacy JSON field for backward compatibility
             settings = frappe.get_single(PluginConfig.PLUGIN_SETTINGS_DOCTYPE)
             setattr(settings, PluginConfig.PLUGIN_SETTINGS_FIELD, json.dumps(list(enabled_plugins)))
             settings.flags.ignore_permissions = True
@@ -193,7 +272,7 @@ class PluginPersistence:
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to save enabled plugins: {e}")
+            self.logger.error(f"Failed to save enabled plugins (legacy): {e}")
             return False
 
 
@@ -208,6 +287,11 @@ class PluginManager:
         self._discovered_plugins: Dict[str, PluginInfo] = {}
         self._enabled_plugins: Set[str] = set()
         self._loaded_tools: Dict[str, ToolInfo] = {}
+        # Diagnostic: tool_name -> reason for any tool that failed to load
+        # (dependency validation failure or import/instantiation exception).
+        # Surfaced via the get_skipped_tools API so admins can see WHY a tool is
+        # missing on a given server without shell access.
+        self.skipped_tools: Dict[str, str] = {}
         self._discovery = PluginDiscovery()
         self._persistence = PluginPersistence()
         self.logger = frappe.logger("plugin_manager")
@@ -263,17 +347,52 @@ class PluginManager:
             return plugins
 
     def get_enabled_plugins(self) -> Set[str]:
-        """Get currently enabled plugin names"""
+        """Get currently enabled plugin names.
+
+        Always reads from database to ensure consistency across workers.
+        """
         with self._lock:
+            # Always read from database for cross-worker consistency
+            db_enabled = self._persistence.load_enabled_plugins()
+
+            # Update in-memory state if different (another worker may have changed it)
+            if db_enabled != self._enabled_plugins:
+                self._enabled_plugins = db_enabled
+                self._load_tools()
+
             return self._enabled_plugins.copy()
 
     def get_all_tools(self) -> Dict[str, ToolInfo]:
-        """Get tools from enabled plugins only"""
+        """Get tools from enabled plugins only.
+
+        Ensures state is synced from database for cross-worker consistency.
+        """
         with self._lock:
+            # Sync state from database (this also reloads tools if needed)
+            db_enabled = self._persistence.load_enabled_plugins()
+            if db_enabled != self._enabled_plugins:
+                self._enabled_plugins = db_enabled
+                self._load_tools()
+
             return self._loaded_tools.copy()
 
+    def get_fac_cloud_only_tools(self) -> Set[str]:
+        """Names of loaded tools whose plugin declared ``is_fac_cloud_only()``.
+
+        Callers other than FAC Cloud must neither see nor be able to invoke these.
+        Tools registered by other apps through the ``assistant_tools`` hook belong to
+        no FAC plugin, so they are never restricted by this.
+        """
+        with self._lock:
+            tools = self.get_all_tools()
+            return {
+                name
+                for name, tool_info in tools.items()
+                if getattr(self._discovered_plugins.get(tool_info.plugin_name), "fac_cloud_only", False)
+            }
+
     def enable_plugin(self, plugin_name: str) -> bool:
-        """Enable a plugin atomically"""
+        """Enable a plugin atomically using DocType-based persistence."""
         with self._lock:
             if plugin_name not in self._discovered_plugins:
                 raise PluginNotFoundError(f"Plugin '{plugin_name}' not found")
@@ -295,9 +414,12 @@ class PluginManager:
                 # Add tools to loaded tools
                 self._loaded_tools.update(plugin_tools)
 
-                # Persist state
-                if not self._persistence.save_enabled_plugins(self._enabled_plugins):
-                    raise PluginError("Failed to persist enabled plugins")
+                # Persist state using new atomic method
+                if not self._persistence.save_plugin_state(plugin_name, True, plugin_info):
+                    raise PluginError("Failed to persist plugin state")
+
+                # Also update legacy JSON for backward compatibility
+                self._persistence.save_enabled_plugins(self._enabled_plugins)
 
                 # Update plugin state
                 plugin_info.state = PluginState.ENABLED
@@ -317,7 +439,7 @@ class PluginManager:
                 raise PluginError(f"Failed to enable plugin '{plugin_name}': {e}")
 
     def disable_plugin(self, plugin_name: str) -> bool:
-        """Disable a plugin atomically"""
+        """Disable a plugin atomically using DocType-based persistence."""
         with self._lock:
             if plugin_name not in self._enabled_plugins:
                 return True  # Already disabled
@@ -335,9 +457,12 @@ class PluginManager:
                 # Remove from enabled set
                 self._enabled_plugins.discard(plugin_name)
 
-                # Persist state
-                if not self._persistence.save_enabled_plugins(self._enabled_plugins):
-                    raise PluginError("Failed to persist enabled plugins")
+                # Persist state using new atomic method
+                if not self._persistence.save_plugin_state(plugin_name, False, plugin_info):
+                    raise PluginError("Failed to persist plugin state")
+
+                # Also update legacy JSON for backward compatibility
+                self._persistence.save_enabled_plugins(self._enabled_plugins)
 
                 self.logger.info(f"Plugin '{plugin_name}' disabled successfully")
                 return True
@@ -349,6 +474,9 @@ class PluginManager:
     def _load_tools(self):
         """Load tools from all enabled plugins"""
         self._loaded_tools.clear()
+        # Reset the diagnostic record so it reflects the current load only and
+        # doesn't accumulate stale entries across reloads.
+        self.skipped_tools = {}
 
         for plugin_name in self._enabled_plugins:
             plugin_info = self._discovered_plugins.get(plugin_name)
@@ -373,7 +501,13 @@ class PluginManager:
                 tool_class = None
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if inspect.isclass(attr) and issubclass(attr, BaseTool) and attr is not BaseTool:
+                    # Skip abstract intermediate bases (e.g. BaseBrowserTool) imported by tool modules.
+                    if (
+                        inspect.isclass(attr)
+                        and issubclass(attr, BaseTool)
+                        and attr is not BaseTool
+                        and not inspect.isabstract(attr)
+                    ):
                         tool_class = attr
                         break
 
@@ -388,6 +522,8 @@ class PluginManager:
                         self.logger.warning(
                             f"Tool {tool_instance.name} dependency validation failed: {deps_error}"
                         )
+                        self.skipped_tools = getattr(self, "skipped_tools", {})
+                        self.skipped_tools[tool_instance.name] = deps_error
                         continue
 
                     tools[tool_instance.name] = ToolInfo(
@@ -398,7 +534,15 @@ class PluginManager:
                     )
 
             except Exception as e:
-                self.logger.error(f"Failed to load tool '{tool_name}' from plugin '{plugin_name}': {e}")
+                # Surface the actual ImportError / exception with full traceback so
+                # the reason a tool silently vanished is visible in the Error Log,
+                # and record it for the get_skipped_tools diagnostic API.
+                self.logger.error(
+                    f"Failed to load tool '{tool_name}' from plugin '{plugin_name}': {e}\n"
+                    f"{traceback.format_exc()}"
+                )
+                self.skipped_tools = getattr(self, "skipped_tools", {})
+                self.skipped_tools[tool_name] = repr(e)
 
         return tools
 

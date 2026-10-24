@@ -1,6 +1,6 @@
 # Contributing to Frappe Assistant Core
 
-Welcome to Frappe Assistant Core! We're excited that you're interested in contributing to this open-source MIT-licensed project. This guide will help you get started with contributing code, documentation, bug reports, and feature requests.
+Welcome to Frappe Assistant Core! We're excited that you're interested in contributing to this open-source AGPL-3.0-licensed project. This guide will help you get started with contributing code, documentation, bug reports, and feature requests.
 
 ## 🌟 How You Can Contribute
 
@@ -60,6 +60,21 @@ Help us improve our docs!
    git checkout -b feature/your-feature-name
    ```
 
+4. **Install pre-commit hooks** — runs the same linters as CI before each commit:
+   ```bash
+   pip install pre-commit
+   pre-commit install
+   pre-commit install --hook-type commit-msg
+   ```
+   See [docs/development/PRE_COMMIT_SETUP.md](docs/development/PRE_COMMIT_SETUP.md) for the full guide, commit-message format, and troubleshooting.
+
+## 🤖 Working with a coding agent
+
+If you are using Claude Code, Codex or a similar tool, read [AGENTS.md](AGENTS.md) first.
+It collects the things that are not guessable from the code — how to run the tests, what
+the commit linter rejects, and the Frappe traps that have actually broken pull requests
+here.
+
 ## 📝 Coding Standards
 
 ### Python Code Style
@@ -81,16 +96,17 @@ Help us improve our docs!
 2. **Run all tests and ensure they pass**
 3. **Update documentation if needed**
 4. **Test your changes manually**
-5. **Rebase your branch on latest main**
+5. **Rebase your branch on latest `develop`** — all pull requests target `develop`, not `main`
 
 ## 📄 License
 
-By contributing to Frappe Assistant Core, you agree that your contributions will be licensed under the **MIT License**. This means:
+By contributing to Frappe Assistant Core, you agree that your contributions will be licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. This means:
 
-- ✅ **Your contributions are free** for everyone to use
-- ✅ **No copyright assignment required**
-- ✅ **You retain copyright** of your contributions
-- ✅ **MIT license applies** to all contributions
+- ✅ **Your contributions are free** for everyone to use, modify, and distribute
+- ✅ **No copyright assignment required** — you retain copyright of your contributions
+- ⚠️ **Copyleft**: derivative works must also be AGPL-3.0 licensed
+- ⚠️ **Network use provision**: providing the software as a service over a network requires source-code access for users
+- ✅ **AGPL-3.0 applies** to all contributions
 
 ## 📞 Communication
 
@@ -103,6 +119,12 @@ By contributing to Frappe Assistant Core, you agree that your contributions will
 - **Be respectful** and inclusive
 - **Provide constructive feedback**
 - **Help others learn** and grow
+
+## 🏷️ Before Tagging a Release
+
+Run the release check before tagging: it asks business questions with known answers through FAC
+Chat on two test sites and fails on any question that used to be answered correctly. See
+[scripts/release_check/README.md](scripts/release_check/README.md).
 
 ## 🎉 Recognition
 

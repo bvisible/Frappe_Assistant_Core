@@ -1,0 +1,149 @@
+import { mount } from "@vue/test-utils";
+import { describe, it, expect } from "vitest";
+import ProcessingCard from "../ProcessingCard.vue";
+
+// Live-bug repro: the card received one chronological `blocks` array and split
+// it into two independent lists, grouped by kind, so a 26-tool turn read as a
+// wall of rows in an order the work never happened in.
+function mountCard(blocks) {
+	return mount(ProcessingCard, {
+		props: { blocks, isExpanded: true, isStreaming: false, messageIndex: 0 },
+	});
+}
+
+const QUOTE = {
+	type: "tool_call",
+	id: "c1",
+	tool_name: "create_document",
+	input: { doctype: "Quotation" },
+	status: "success",
+	result: { success: true, name: "QTN-0001" },
+};
+
+const SUBMIT = {
+	type: "tool_call",
+	id: "c2",
+	tool_name: "document_action",
+	input: { doctype: "Quotation", name: "QTN-0001", action: "submit" },
+	status: "success",
+	result: { success: true },
+};
+
+describe("ProcessingCard chronology", () => {
+	it("renders rows in the order the blocks arrived, not grouped by kind", () => {
+		// A non-tool block has to sit BETWEEN the tools for this to bite —
+		// grouping by kind preserves the relative order of the tools themselves,
+		// so a tool-only fixture passes under the very bug this test names.
+		const wrapper = mountCard([
+			QUOTE,
+			{ type: "thinking", id: "th1", content: "now submit it" },
+			SUBMIT,
+		]);
+
+		const sequence = wrapper
+			.findAll(".processing-stream > *")
+			.map((n) =>
+				n.find(".timeline-label").exists() ? n.find(".timeline-label").text() : "thinking"
+			);
+
+		expect(sequence).toEqual([
+			"Created Quotation → QTN-0001",
+			"thinking",
+			"Submitted Quotation → QTN-0001",
+		]);
+	});
+
+	it("still hides internal tool calls", () => {
+		const wrapper = mountCard([
+			{ ...QUOTE, id: "c9", tool_name: "get_skill", isInternal: true },
+		]);
+
+		expect(wrapper.findAll(".timeline-label")).toHaveLength(0);
+	});
+});
+
+describe("ProcessingCard with nothing to show", () => {
+	// Every block filtered out leaves the summary header as the only content.
+	// An openable card whose body is empty reads as a broken control.
+	it("offers no body or chevron when every tool is internal", () => {
+		const wrapper = mountCard([
+			{ ...QUOTE, id: "c9", tool_name: "get_skill", isInternal: true },
+			{ ...QUOTE, id: "c10", tool_name: "workspace_read_file", isInternal: true },
+		]);
+
+		expect(wrapper.find(".processing-card-content").exists()).toBe(false);
+		expect(wrapper.find(".processing-chevron").exists()).toBe(false);
+		expect(wrapper.find(".processing-summary").exists()).toBe(true);
+
+		// Not merely bodyless — not a control at all, so it is neither focusable
+		// nor announced as a collapsed disclosure that opens nothing.
+		const header = wrapper.find(".processing-card-header");
+		expect(header.element.tagName).toBe("DIV");
+		expect(header.attributes("aria-expanded")).toBeUndefined();
+	});
+});
+
+describe("ProcessingCard tool rows", () => {
+	// The Quiet Ledger spec (§3.2) mandates the touched record be emphasized so
+	// the row is scannable; buildTimelineRows computed `target` but both
+	// renderers flattened it back into one undifferentiated string.
+	it("emphasises the record a tool touched", () => {
+		const wrapper = mountCard([QUOTE]);
+
+		const label = wrapper.find(".timeline-label");
+		expect(label.find("strong").text()).toBe("QTN-0001");
+		expect(label.text()).toBe("Created Quotation → QTN-0001");
+	});
+
+	it("shows tool I/O without repeating the tool header inside the drawer", async () => {
+		const wrapper = mountCard([QUOTE]);
+		await wrapper.find(".timeline-line").trigger("click");
+
+		expect(wrapper.find(".timeline-drawer").exists()).toBe(true);
+		expect(wrapper.find(".timeline-drawer .tool-header").exists()).toBe(false);
+	});
+});
+
+// A stopped turn persists a tool block that never got its result as `running`,
+// so after a reload its row kept spinning on a turn that had ended.
+describe("ProcessingCard on a turn that has ended", () => {
+	const LEFT_RUNNING = {
+		type: "tool_call",
+		id: "r1",
+		tool_name: "list_documents",
+		input: { doctype: "Sales Invoice" },
+		status: "running",
+		startTime: "2026-07-20T09:00:00.000Z",
+		endTime: null,
+	};
+
+	it("stops presenting a tool left running as in flight", () => {
+		const row = mountCard([LEFT_RUNNING]).find(".timeline-row");
+
+		expect(row.classes()).toContain("timeline-stopped");
+		expect(row.find(".chip-spinner").exists()).toBe(false);
+	});
+
+	it("keeps the spinner while the turn is still streaming", () => {
+		const wrapper = mount(ProcessingCard, {
+			props: { blocks: [LEFT_RUNNING], isExpanded: true, isStreaming: true, messageIndex: 0 },
+		});
+
+		expect(wrapper.find(".timeline-row .chip-spinner").exists()).toBe(true);
+	});
+});
+
+describe("ProcessingCard failed step", () => {
+	it("failed step shows the plain reason", () => {
+		const wrapper = mountCard([
+			{ ...QUOTE, status: "error", result: { success: false, error: "Server scripts are disabled. Ask an admin." } },
+		]);
+		expect(wrapper.find(".timeline-reason").text()).toBe("Server scripts are disabled.");
+	});
+
+	it("shows no reason line when the failure carries no message", () => {
+		const wrapper = mountCard([{ ...QUOTE, status: "error", result: '{"succ' }]);
+		expect(wrapper.find(".timeline-reason").exists()).toBe(false);
+	});
+});
+

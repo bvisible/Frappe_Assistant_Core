@@ -24,6 +24,7 @@ and security policies following Frappe Framework standards.
 from typing import Any, Dict, List, Optional, Set
 
 import frappe
+from frappe import _
 
 # Basic Core tools available to ALL users (document permissions will control access)
 BASIC_CORE_TOOLS = [
@@ -273,67 +274,52 @@ ADMIN_ONLY_FIELDS = {
     "Dropbox Settings": "*",
 }
 
-# DocTypes that should be completely hidden from Assistant Users
-RESTRICTED_DOCTYPES = {
-    "Assistant User": [
-        # System administration
-        "System Settings",
-        "Print Settings",
-        "Email Domain",
-        "LDAP Settings",
-        "OAuth Settings",
-        "Social Login Key",
-        "Dropbox Settings",
-        "Connected App",
-        "OAuth Bearer Token",
-        # Security and permissions
-        "Role",
-        "User Permission",
-        "Role Permission",
-        "Custom Role",
-        "Module Profile",
-        "Role Profile",
-        "Custom DocPerm",
-        "DocShare",
-        # System logs and audit
-        "Error Log",
-        "Activity Log",
-        "Access Log",
-        "View Log",
-        "Scheduler Log",
-        "Integration Request",
-        # System customization
-        "Server Script",
-        "Client Script",
-        "Custom Script",
-        "Property Setter",
-        "Customize Form",
-        "Customize Form Field",
-        "DocType",
-        "DocField",
-        "DocPerm",
-        "Custom Field",
-        # Development tools
-        "Package",
-        "Package Release",
-        "Installed Application",
-        "Data Import",
-        "Data Export",
-        "Bulk Update",
-        "Rename Tool",
-        "Database Storage Usage By Tables",
-        # Workflows (admin level)
-        "Workflow",
-        "Workflow Action",
-        "Workflow State",
-        "Workflow Transition",
-        # Email system internals
-        "Email Queue",
-        "Email Queue Recipient",
-        "Email Alert",
-        "Auto Email Report",
-    ]
-}
+SCRIPT_REPORT_TYPES = ("Query Report", "Script Report")
+
+# DocTypes whose contents are executable code, or which define the schema and the
+# permission model itself. Writing to any of these over MCP is a privilege-escalation
+# or code-execution surface, so it stays blocked regardless of what DocPerms say.
+#
+# Reads are NOT blocked here: on a stock Frappe install every one of these DocTypes
+# already grants `read` to System Manager / Script Manager only, so a blocklist adds
+# nothing. It only ever fires when a site admin has deliberately granted read via a
+# Custom DocPerm, i.e. against explicit intent. Read access is therefore left to
+# frappe.has_permission(), which validate_document_access() calls a few lines down.
+# See issue #249.
+WRITE_PROTECTED_DOCTYPES = [
+    # Code execution
+    "Server Script",
+    "Client Script",
+    "Custom Script",
+    # Schema and customization
+    "DocType",
+    "DocField",
+    "DocPerm",
+    "Custom Field",
+    "Property Setter",
+    "Customize Form",
+    "Customize Form Field",
+    # Security and permissions
+    "Role",
+    "Custom Role",
+    "Role Permission",
+    "Custom DocPerm",
+    "User Permission",
+    "DocShare",
+    "Module Profile",
+    "Role Profile",
+    # Workflow definitions (control who may transition what)
+    "Workflow",
+    "Workflow State",
+    "Workflow Transition",
+]
+
+# Permission types treated as mutating for the purposes of WRITE_PROTECTED_DOCTYPES.
+WRITE_PERM_TYPES = frozenset({"write", "create", "delete", "submit", "cancel", "amend"})
+
+# DEPRECATED: retained only so external plugins importing this name keep working.
+# The read-side blocklist is no longer enforced - see WRITE_PROTECTED_DOCTYPES above.
+RESTRICTED_DOCTYPES = {"Assistant User": list(WRITE_PROTECTED_DOCTYPES)}
 
 
 def check_tool_access(user_role: str, tool_name: str) -> bool:
@@ -437,28 +423,144 @@ def filter_sensitive_fields(doc_dict: Dict[str, Any], doctype: str, user_role: s
     return filtered_doc
 
 
-def is_doctype_accessible(doctype: str, user_role: str) -> bool:
+def get_restricted_fields(doctype: str, user_role: str) -> Set[str]:
+    """Fields the assistant may not write on ``doctype`` for ``user_role``.
+
+    SENSITIVE_FIELDS apply to every role; ADMIN_ONLY_FIELDS (owner, creation,
+    docstatus, ...) only to an Assistant User. create_document and
+    update_document both resolve their parent *and* child-row restrictions
+    here, so the two tools cannot drift apart again (issue #291).
     """
-    Check if a user role can access a specific DocType.
+    restricted: Set[str] = set()
+    restricted.update(SENSITIVE_FIELDS.get("all_doctypes", []))
+    restricted.update(SENSITIVE_FIELDS.get(doctype, []))
+
+    if user_role == "Assistant User":
+        restricted.update(ADMIN_ONLY_FIELDS.get("all_doctypes", []))
+        doctype_admin_fields = ADMIN_ONLY_FIELDS.get(doctype, [])
+        if doctype_admin_fields != "*":
+            restricted.update(doctype_admin_fields)
+
+    return restricted
+
+
+def get_child_table_parents(child_doctype: str, user: str, ptype: str = "read") -> List[Dict[str, str]]:
+    """The doctypes that embed ``child_doctype`` as a table, as far as ``user`` may see.
+
+    A child doctype has no permissions of its own: Frappe decides it through a
+    parent (``has_permission(child, parent_doctype=...)``). Each candidate is put
+    to that same check, so nothing is listed that the user could not reach, and
+    the names of doctypes they cannot read are not disclosed.
+    """
+    from frappe.model import table_fields
+
+    # DocField and Custom Field are schema, read here only to find candidates;
+    # every candidate is filtered through frappe.has_permission below.
+    candidates = {
+        (row.parent, row.fieldname)
+        for row in frappe.get_all(
+            "DocField",
+            filters={
+                "parenttype": "DocType",
+                "fieldtype": ["in", list(table_fields)],
+                "options": child_doctype,
+            },
+            fields=["parent", "fieldname"],
+        )
+    }
+    candidates.update(
+        (row.dt, row.fieldname)
+        for row in frappe.get_all(
+            "Custom Field",
+            filters={"fieldtype": ["in", list(table_fields)], "options": child_doctype},
+            fields=["dt", "fieldname"],
+        )
+    )
+
+    return [
+        {"doctype": parent, "fieldname": fieldname}
+        for parent, fieldname in sorted(candidates)
+        if not frappe.is_table(parent)
+        and frappe.has_permission(child_doctype, ptype, user=user, parent_doctype=parent)
+    ]
+
+
+def child_table_doctype_error(doctype: str, perm_type: str, user: str) -> Dict[str, Any]:
+    """Refuse a direct operation on a child doctype, and say which parent to use instead."""
+    parents = get_child_table_parents(doctype, user)
+    via = ", ".join(f"{p['doctype']}.{p['fieldname']}" for p in parents)
+
+    return {
+        "success": False,
+        "error": (
+            f"{doctype} is a child table: its rows exist only inside a parent document, "
+            f"so it cannot be used for '{perm_type}' on its own."
+            + (f" It is a table on: {via}." if via else "")
+        ),
+        "error_type": "child_table_doctype",
+        "doctype": doctype,
+        "parent_doctypes": parents,
+        "suggestion": (
+            "Work through the parent document instead. To add or change rows, call "
+            "update_document on the parent with the table field. Rows without a 'name' "
+            "replace the whole table, so include the 'name' of existing rows you want to "
+            "keep. Use get_document on the parent to read them."
+        ),
+    }
+
+
+def is_doctype_accessible(doctype: str, user_role: str, perm_type: str = "read") -> bool:
+    """
+    Check whether a role may perform ``perm_type`` on ``doctype`` at the FAC layer.
+
+    This is a coarse guard that runs *before* Frappe's own permission check, so it may
+    only ever deny something Frappe would allow - never the reverse. It exists for one
+    purpose: to keep MCP from writing to code-execution and schema/permission DocTypes
+    even on a site whose DocPerms would permit it.
+
+    Read access is always allowed through to frappe.has_permission(), which is the real
+    control. See issue #249 for why the old read-side blocklist was removed.
 
     Args:
         doctype: DocType name
         user_role: User role name
+        perm_type: Permission being requested (read, write, create, delete, ...)
 
     Returns:
-        bool: True if access is allowed, False otherwise
+        bool: True if FAC allows the operation to proceed to the Frappe permission check
     """
     if user_role == "System Manager":
-        return True  # System Manager can access all doctypes
+        return True  # System Manager is trusted at this layer
 
-    # Default users follow the same DocType restrictions as Assistant User for safety
-    role_to_check = user_role if user_role in RESTRICTED_DOCTYPES else "Assistant User"
+    if perm_type not in WRITE_PERM_TYPES:
+        return True  # Reads and anything non-mutating defer entirely to Frappe
 
-    restricted_doctypes = RESTRICTED_DOCTYPES.get(role_to_check, [])
-    return doctype not in restricted_doctypes
+    return doctype not in WRITE_PROTECTED_DOCTYPES
 
 
-def validate_document_access(user: str, doctype: str, name: str, perm_type: str = "read") -> Dict[str, Any]:
+def _write_protected_message(doctype: str) -> str:
+    """Refusal for a write-protected doctype; Server Script also needs the Script Manager role."""
+    if doctype == "Server Script":
+        return _(
+            "Changing {0} needs a System Manager with the Script Manager role. "
+            "Ask one to make this change in Desk."
+        ).format(doctype)
+    return _("Changing {0} needs a System Manager. Ask one to make this change in Desk.").format(doctype)
+
+
+def _missing_permission_message(perm_type: str, doctype: str, data: Any) -> str:
+    """Say what is missing; scripts need the Script Manager role, which System Manager lacks."""
+    report_type = data.get("report_type") if isinstance(data, dict) else None
+    if doctype == "Server Script" or (doctype == "Report" and report_type in SCRIPT_REPORT_TYPES):
+        return _("Working with {0} needs the Script Manager role, which your account does not have.").format(
+            doctype
+        )
+    return _("Insufficient {0} permissions for {1}").format(perm_type, doctype)
+
+
+def validate_document_access(
+    user: str, doctype: str, name: str, perm_type: str = "read", data: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Validate if a user can access a specific document with proper Frappe permission checking.
 
@@ -475,13 +577,33 @@ def validate_document_access(user: str, doctype: str, name: str, perm_type: str 
         # Get user's primary role (includes Default for non-assistant users)
         primary_role = get_user_primary_role(user)
 
-        # Check if DocType is accessible for this role
-        if not is_doctype_accessible(doctype, primary_role):
-            return {"success": False, "error": f"Access to {doctype} is restricted for your role"}
+        # FAC-level guard: blocks writes to code-execution / schema DocTypes only.
+        # Reads fall straight through to the Frappe permission check below.
+        if not is_doctype_accessible(doctype, primary_role, perm_type):
+            return {
+                "success": False,
+                "error": _write_protected_message(doctype),
+                "error_type": "permission_error",
+            }
+
+        # A child row is only ever written through its parent, which is where the
+        # parent's validation and docstatus rules run. Writing one directly skips
+        # both, and Frappe lets Administrator do it before it reaches its own
+        # child-table rule, so refuse every write here, for every user (#291).
+        if perm_type in WRITE_PERM_TYPES and frappe.is_table(doctype):
+            return child_table_doctype_error(doctype, perm_type, user)
 
         # Check Frappe DocType-level permissions - this is the primary security control
         if not frappe.has_permission(doctype, perm_type, user=user):
-            return {"success": False, "error": f"Insufficient {perm_type} permissions for {doctype}"}
+            # Frappe denies a child doctype checked without a parent. Reads keep that
+            # decision, but say why instead of reporting a missing permission.
+            if frappe.is_table(doctype):
+                return child_table_doctype_error(doctype, perm_type, user)
+            return {
+                "success": False,
+                "error": _missing_permission_message(perm_type, doctype, data),
+                "error_type": "permission_error",
+            }
 
         # Check document-level permissions (if document exists)
         if name:
@@ -497,10 +619,17 @@ def validate_document_access(user: str, doctype: str, name: str, perm_type: str 
                     doc = frappe.get_doc(doctype, name)
                     if hasattr(doc, "docstatus") and doc.docstatus == 1:
                         if perm_type == "write":
-                            return {
-                                "success": False,
-                                "error": f"Cannot modify submitted document {doctype} {name}",
-                            }
+                            meta = frappe.get_meta(doctype)
+                            non_allowed_fields = []
+                            for field in data.keys():
+                                field_meta = meta.get_field(field)
+                                if not field_meta or not field_meta.allow_on_submit:
+                                    non_allowed_fields.append(field)
+                            if non_allowed_fields:
+                                return {
+                                    "success": False,
+                                    "error": f"Cannot modify submitted document {doctype} {name}",
+                                }
                         elif perm_type == "delete":
                             return {
                                 "success": False,

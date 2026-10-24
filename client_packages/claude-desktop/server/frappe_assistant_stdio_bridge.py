@@ -9,6 +9,7 @@ import os
 import queue
 import sys
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Any, Dict
 
@@ -32,9 +33,17 @@ class StdioMCPWrapper:
         # Remove trailing slash if present
         self.server_url = self.server_url.rstrip("/")
 
+        # One session id per bridge process, so all tool calls in a single
+        # Claude Desktop conversation share a correlation id in the audit log.
+        # Client id identifies which MCP client hit the server.
+        self.session_id = os.environ.get("FRAPPE_MCP_SESSION_ID") or str(uuid.uuid4())
+        self.client_id = os.environ.get("FRAPPE_MCP_CLIENT_ID") or "claude-desktop-stdio"
+
         self.headers = {
             "Authorization": f"token {self.api_key}:{self.api_secret}",
             "Content-Type": "application/json",
+            "Mcp-Session-Id": self.session_id,
+            "X-Assistant-Client-Id": self.client_id,
         }
 
         # Thread pool for handling concurrent requests
@@ -55,13 +64,25 @@ class StdioMCPWrapper:
         try:
             self.log_debug(f"Sending to server: {request_data}")
 
-            # Reduce timeout to 5 seconds to stay under Claude's 6 second timeout
+            # Use longer timeout for tool calls (OCR, report generation, etc.)
+            # Short timeout for metadata requests (initialize, tools/list)
+            method = request_data.get("method", "")
+            if method == "tools/call":
+                timeout = int(os.environ.get("MCP_TOOL_TIMEOUT", "300"))
+            else:
+                timeout = int(os.environ.get("MCP_REQUEST_TIMEOUT", "30"))
+
             response = requests.post(
                 f"{self.server_url}/api/method/frappe_assistant_core.api.fac_endpoint.handle_mcp",
                 headers=self.headers,
                 json=request_data,
-                timeout=5,
+                timeout=timeout,
             )
+
+            # 202 = notification accepted (no response body expected)
+            if response.status_code == 202:
+                self.log_debug(f"Notification accepted (202) for method: {method}")
+                return None
 
             if response.status_code == 200:
                 result = response.json()
@@ -180,8 +201,9 @@ class StdioMCPWrapper:
                 # Forward all other requests (including prompts/*) to HTTP server
                 response = self.send_to_server(request)
 
-            # Only send response if request had an id (notifications don't get responses)
-            if request_id is not None:
+            # Only send response if request had an id and we got a response
+            # (notifications return None from send_to_server)
+            if request_id is not None and response is not None:
                 with self.output_lock:
                     print(json.dumps(response), flush=True)
             else:

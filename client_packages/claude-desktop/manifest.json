@@ -116,20 +116,12 @@
       "description": "Remove documents from the system with permission checks"
     },
     {
-      "name": "submit_document",
-      "description": "Submit documents to change status from draft to submitted"
+      "name": "document_action",
+      "description": "Submit a draft document, cancel a submitted one, or amend a cancelled one"
     },
     {
       "name": "search_documents",
-      "description": "Global search across all accessible documents"
-    },
-    {
-      "name": "search_doctype",
-      "description": "Search within a specific DocType with filters"
-    },
-    {
-      "name": "search_link",
-      "description": "Search for link field options and references"
+      "description": "Text search for documents — global, scoped to one DocType, or resolving a Link field value"
     },
     {
       "name": "get_doctype_info",
@@ -142,10 +134,6 @@
     {
       "name": "run_python_code",
       "description": "Execute Python code in sandbox for advanced data analysis with pandas, numpy, and matplotlib"
-    },
-    {
-      "name": "analyze_business_data",
-      "description": "Perform statistical analysis (profiling, trends, correlations) on business data"
     },
     {
       "name": "run_database_query",

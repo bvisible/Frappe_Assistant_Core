@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "frappe_assistant_core"
-version = "2.3.0"
+version = "3.2.1"
 description = "AI-powered ERP assistant with comprehensive MCP integration for Frappe framework"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 keywords = ["frappe", "erp", "ai", "assistant", "mcp", "analysis", "business-intelligence"]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     # Core data science libraries
     "pandas>=1.3.0",
@@ -52,12 +52,20 @@ dependencies = [
     "pypdf>=3.0.0",
     "Pillow>=10.0.0",
     "python-docx>=0.8.11",
-    "pytesseract>=0.3.10",
-    "chardet~=5.1.0",  # Compatible with frappe ~=5.1.0 requirement
-    # Advanced file processing
-    "pymupdf>=1.23.0",
+    "chardet>=5.1.0,<6.0.0",  # Compatible with frappe ~=5.1.0 requirement
+    "pymupdf>=1.24.0",  # PDF page rendering for Ollama vision OCR
     "python-magic>=0.4.27",
-    "beautifulsoup4>=4.12.2,<5",  # //// Neoffice — was ~=4.12.2 to match frappe; suite needs >=4.13.5 (maintenance#1679)
+    "beautifulsoup4>=4.12,<5",  # Span Frappe v15 (~=4.12.2) and v16 (~=4.13.5) without forcing a downgrade
+    "markdown2>=2.4.8,<3",  # generate_document; spans Frappe v15 (~=2.4.8) and v16 (~=2.5.4)
+    "nh3>=0.3.2,<0.4",  # generate_document's sanitiser; Frappe v16 ships it (~=0.3.2) and dropped bleach; v15 has bleach only
+
+    # Exact pin, not a floor. FAC and the SDK ship as a coupled pair: FAC calls
+    # methods that only exist from a given release onward, and a floor lets pip
+    # resolve to an older published version that lacks them — which surfaces as
+    # AttributeError at runtime, in production, rather than at install time.
+    # Local dev overrides this with `pip install -e apps/assistant_runtime_sdk`;
+    # UAT pins an exact prerelease (e.g. ==1.6.0rc1).
+    "assistant_runtime_sdk==1.12.1",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +75,10 @@ dev = [
     "black>=21.0",
     "flake8>=3.9",
     "mypy>=0.910",
+]
+ocr = [
+    "paddleocr>=2.9.0",
+    "paddlepaddle>=2.6.0,<3.1.0",  # 3.3.0 has oneDNN/PIR bug on CPU
 ]
 # Optional PDF table extraction (has security vulnerability in transitive dep pdfminer.six)
 # Only install if you need PDF table extraction feature
@@ -78,7 +90,7 @@ pdf-tables = [
 
 [project.urls]
 Homepage = "https://github.com/buildswithpaul/Frappe_Assistant_Core"
-Documentation = "https://github.com/buildswithpaul/Frappe_Assistant_Core/wiki"
+Documentation = "https://docs.assistantcore.cloud"
 Repository = "https://github.com/buildswithpaul/Frappe_Assistant_Core.git"
 "Bug Tracker" = "https://github.com/buildswithpaul/Frappe_Assistant_Core/issues"
 
@@ -171,3 +183,12 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "frappe_assistant_core/plugins/base_plugin.py" = ["B027"]
+
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<17.0.0"
+
+# The FAC Chat SPA. Its build also writes the Desk widget to public/chat/widget-app.
+[tool.bench.assets]
+build_dir = "./frappe_assistant_core/chat/frontend"
+out_dir = "./frappe_assistant_core/public/chat/spa"
+index_html_path = "./frappe_assistant_core/www/copilot.html"

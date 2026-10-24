@@ -14,6 +14,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# //// Neoffice — added file (no upstream equivalent).
+# //// Former upstream tool, kept after upstream renamed it document_action: the hub's MCP clients call it by this name.
+
 """
 Document Submit Tool for Core Plugin.
 Submits draft documents after validation.
