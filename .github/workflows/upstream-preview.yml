@@ -15,5 +15,7 @@ jobs:
     uses: bvisible/neoffice-ci/.github/workflows/frappe-app-ci.yml@main
     with:
       app: frappe_assistant_core
+      # //// Neoffice — the same apps as tests.yml: the mirror check stops a preview that differs before any test (09.11.2026)
+      install_apps: "erpnext"
       upstream_preview: true
     secrets: inherit
