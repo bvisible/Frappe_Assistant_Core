@@ -3,6 +3,13 @@ import frappe
 from frappe_assistant_core.chat.gate import is_chat_enabled
 from frappe_assistant_core.chat.utils.security_headers import apply_spa_headers
 
+# //// Neoffice — the directory www/copilot/ (conversations.py, settings.py and two static copies of
+# //// the SPA shell) is removed. Next to this module, without an __init__.py, it made
+# //// frappe_assistant_core.www.copilot resolve to this file, which is not a package: Frappe's website router
+# //// imports every www controller to list the site's pages, so /sitemap.xml answered 500 on any site that
+# //// runs this app. The sub-pages were redundant: website_route_rules (hooks.py) sends every
+# //// /copilot/<path> to this page before the renderers look for a file. To retire if upstream restructures
+# //// www/copilot; never put a directory called copilot back next to this module.
 no_cache = 1
 
 
@@ -17,8 +24,8 @@ def get_context(context):
         raise frappe.PageDoesNotExistError
 
     # Security: CSP, X-Frame-Options, Referrer-Policy for the SPA shell.
-    # Applied to all /copilot/* routes since conversations.py and
-    # settings.py re-export this get_context unchanged.
+    # Applied to all /copilot/* routes: website_route_rules (hooks.py) serves
+    # every /copilot/<path> with this page.
     apply_spa_headers()
 
     # Require authentication. Keep the original path and query, so a
