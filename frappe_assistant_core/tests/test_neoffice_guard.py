@@ -73,6 +73,17 @@ class TestNeofficeGuard(BaseAssistantTest):
     def test_mcp_endpoint_is_not_touched(self):
         self.assertIsNone(self._call(MCP_PATH, WEB_USER))
 
+    def test_the_mcp_check_refuses_a_website_user_whose_assistant_flag_is_on(self):
+        # The flag defaults to 1 for every new account: the user type is what keeps a portal customer out.
+        from frappe_assistant_core.api import assistant_api, fac_endpoint
+
+        frappe.db.set_value("User", WEB_USER, "assistant_enabled", 1)
+        frappe.db.set_value("User", STAFF_USER, "assistant_enabled", 1)
+        self.assertFalse(fac_endpoint._check_assistant_enabled(WEB_USER))
+        self.assertFalse(assistant_api._check_assistant_enabled(WEB_USER))
+        self.assertTrue(fac_endpoint._check_assistant_enabled(STAFF_USER))
+        self.assertTrue(assistant_api._check_assistant_enabled(STAFF_USER))
+
     def test_guest_is_left_to_frappe(self):
         self.assertIsNone(self._call(CHAT_PATH, "Guest"))
 
