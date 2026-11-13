@@ -68,6 +68,11 @@ class CorePlugin(BasePlugin):
             "get_pending_approvals",
             # Email
             "send_email",
+            # Permission checks
+            "test_as_user",
+            # Builder checks
+            "sandbox_reference",
+            "recent_errors",
             # //// Neoffice — added tools (no upstream equivalent): the two other steps of our draft-then-confirm
             # //// e-mail flow, which our send_email (a file upstream also has, with another contract) belongs to.
             "confirm_send_email",

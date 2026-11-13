@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { defineComponent } from "vue";
 import { mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
-import { createSpaConnectHandler, createVisibilityHandler, useStreaming } from "./useStreaming";
+import { createSpaConnectHandler, createVisibilityHandler, onSpaSocketEvent, useStreaming } from "./useStreaming";
 import { useChatStore } from "@/stores/chatStore";
 
 vi.mock("@/api/client", () => ({
@@ -177,7 +177,13 @@ describe("SPA socket wiring", () => {
 				return () => null;
 			},
 		});
+		// A listener added before the socket exists is attached when it is made.
+		const early = vi.fn();
+		const offEarly = onSpaSocketEvent("faco_browser_tool_call", early);
 		mount(Dummy, { global: { plugins: [pinia] } });
+		expect(fake.on).toHaveBeenCalledWith("faco_browser_tool_call", early);
+		offEarly();
+		expect(fake.off).toHaveBeenCalledWith("faco_browser_tool_call", early);
 
 		// Recovery must NOT hang off the Socket's "reconnect" (dead in v4).
 		const socketEvents = fake.on.mock.calls.map((c) => c[0]);
@@ -211,7 +217,7 @@ describe("SPA socket wiring", () => {
 	});
 });
 
-describe("browser_navigate_to hand-off", () => {
+describe("browser_navigate_to in the stream", () => {
 	let handler;
 	let hrefSet;
 	let originalLocation;
@@ -279,10 +285,12 @@ describe("browser_navigate_to hand-off", () => {
 		vi.advanceTimersByTime(1000);
 	}
 
-	it("hard-navigates and stores the hand-off on the SPA", () => {
+	// #34515: following a widget turn's navigate_to took the user out of the chat app to Desk, where
+	// the widget then asked for that turn's next browser tool while the user was back in the chat.
+	it("never leaves the chat app for Desk", () => {
 		fireNavigate();
-		expect(hrefSet).toHaveBeenCalledWith("/app/todo");
-		expect(sessionStorage.getItem("faco_widget_session")).toContain("s-nav");
+		expect(hrefSet).not.toHaveBeenCalled();
+		expect(sessionStorage.getItem("faco_widget_session")).toBeNull();
 	});
 
 	it("leaves Desk alone in the widget: the launcher's navigate_to already routed", async () => {

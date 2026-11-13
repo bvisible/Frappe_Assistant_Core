@@ -9,8 +9,12 @@ The `update_document` tool modifies field values on an existing Frappe document.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `doctype` | string | **Yes** | Exact **parent** DocType name (e.g., `Sales Order`, not `Sales Order Item`) |
-| `name` | string | **Yes** | Document name/ID to update |
-| `data` | object | **Yes** | Only the fields to change. For child tables, pass a list of row dicts under the table fieldname; a Table MultiSelect also takes its link values |
+| `name` | string | One of `name`/`names`/`records` | Document name/ID to update |
+| `names` | array | One of `name`/`names`/`records` | Several documents that all get the same `data` |
+| `records` | array | One of `name`/`names`/`records` | Several documents, each `{"name": ..., "data": {...}}`, for different changes |
+| `mode` | string | No | For `names`/`records`: `all_or_nothing` (default) or `continue` |
+| `data` | object | With `name` or `names` | Only the fields to change. For child tables, pass a list of row dicts under the table fieldname; a Table MultiSelect also takes its link values |
+| `validate_only` | boolean | No | `true` checks the change without saving it (see [Checking a change without saving](#checking-a-change-without-saving)) |
 
 ## Response Format
 
@@ -36,7 +40,7 @@ The `update_document` tool modifies field values on an existing Frappe document.
 }
 ```
 
-The response confirms which fields were updated and shows the document's current state.
+The response confirms which fields were updated and shows the document's current state. For a `FAC Page` it also returns `page_url`, the `/app/fac-pages/<name>` link (a personal page's name is its slug plus an owner tag) where the page opens (`url` stays the form).
 
 ## Updating child-table rows
 
@@ -97,6 +101,46 @@ Both modes work the same way. A bare value is a new row whose `link_field` (see 
 ### Why call on the parent, not the child
 
 ERPNext (and Frappe in general) computes derived fields — row `amount`, parent `total`, `total_qty`, `grand_total`, taxes, etc. — inside the parent doc's `validate()` pipeline. Calling `update_document` directly on a child-table doctype like `Sales Order Item` saves the row in isolation and **bypasses that pipeline**, leaving the row's `amount` and the parent's totals stale. The tool detects this and refuses.
+
+## Updating many records
+
+Same change to every record:
+
+```json
+{"doctype": "ToDo", "names": ["abc123", "def456"], "data": {"status": "Closed"}}
+```
+
+A different change to each record:
+
+```json
+{
+  "doctype": "ToDo",
+  "records": [
+    {"name": "abc123", "data": {"status": "Closed"}},
+    {"name": "def456", "data": {"priority": "High"}}
+  ]
+}
+```
+
+Each record goes through the single-update path, with the same checks.
+- At most 100 records per call; split a larger job into several calls.
+- `mode: "all_or_nothing"` (the default) saves nothing if any record fails, and `failed_record` names the record and its error. `mode: "continue"` saves the records that pass and lists each record's outcome in `results`.
+- Customisation DocTypes (Custom Field, Property Setter, Server Script, Client Script, DocType, Workflow, Report, Print Format, Notification and similar) are refused in a batch: write them one at a time so each one is previewed.
+
+## Checking a change without saving
+
+Pass `validate_only: true` to test a change, typically a rule that runs when a record is edited (a Before Save server script, a validate hook that compares old and new values):
+
+```json
+{"doctype": "ToDo", "name": "abc123", "data": {"priority": "High"}, "validate_only": true}
+```
+
+The change goes through the same checks as a real update: write permission on the record, restricted and higher-permlevel fields, the submitted-record rules, link checks. Then the record's Before Validate and Before Save rules (Before Save (Submitted Document) on a submitted record) run, with the stored values still readable, so a rule can compare old and new. Then everything is undone. Nothing is saved, including anything those rules wrote.
+
+- A pass returns `validation_passed: true`. A refusal returns `success: false` and the rule's own message in `error`.
+- It does not check mandatory fields or Select values, and it does not run After Save rules or `before_save`, so the real update can still fail. A pass is not proof the save will succeed.
+- With `names` or `records`, every record is checked, nothing is saved, and `results` lists each record's outcome.
+- Outside effects a rule causes (an email sent directly, a call to another system) are not undone. On a business DocType the dry run still asks for approval.
 
 ## Best Practices
 

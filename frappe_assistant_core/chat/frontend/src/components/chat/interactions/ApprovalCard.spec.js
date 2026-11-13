@@ -4,17 +4,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const messagePreview = vi.fn();
 const currentCode = vi.fn();
 const fieldPlacement = vi.fn();
+const codeGoingLive = vi.fn();
 vi.mock("@/api/client", () => ({
 	api: {
 		tools: {
 			messagePreview: (...a) => messagePreview(...a),
 			currentCode: (...a) => currentCode(...a),
 			fieldPlacement: (...a) => fieldPlacement(...a),
+			codeGoingLive: (...a) => codeGoingLive(...a),
 		},
 	},
 }));
 
 import ApprovalCard from "@/components/chat/interactions/ApprovalCard.vue";
+import CodePreview from "@/components/chat/interactions/CodePreview.vue";
 
 const interrupts = [{ id: "i1", reason: { type: "approval" } }];
 
@@ -37,6 +40,8 @@ beforeEach(() => {
 	currentCode.mockRejectedValue(new Error("not fetched"));
 	fieldPlacement.mockReset();
 	fieldPlacement.mockRejectedValue(new Error("not fetched"));
+	codeGoingLive.mockReset();
+	codeGoingLive.mockResolvedValue([]);
 });
 
 describe("ApprovalCard for a message tool", () => {
@@ -48,7 +53,7 @@ describe("ApprovalCard for a message tool", () => {
 		expect(wrapper.findComponent({ name: "EmailPreview" }).exists()).toBe(true);
 		expect(wrapper.find(".approval-table").exists()).toBe(false);
 		expect(buttons(wrapper)).toEqual(["Send email", "Reject"]);
-		expect(wrapper.find(".trust-choice").text()).toBe("Don't ask again for this tool");
+		expect(wrapper.find(".trust-choice").text()).toBe("Don't ask again for Send Email");
 		await wrapper.find(".ql-btn-approve").trigger("click");
 		expect(wrapper.emitted("approve")[0]).toEqual(["t1", [{ interruptId: "i1", response: "approve" }]]);
 	});
@@ -150,7 +155,7 @@ describe("ApprovalCard for a CRM email", () => {
 
 describe("ApprovalCard for other tools", () => {
 	it("keeps the field table and never fetches a preview", () => {
-		const block = { id: "t4", tool_name: "create_document", input: { doctype: "ToDo", description: "x" }, interrupts };
+		const block = { id: "t4", tool_name: "create_document", input: { doctype: "ToDo", description: "x", priority: "High" }, interrupts };
 		const wrapper = mount(ApprovalCard, { props: { block } });
 		expect(messagePreview).not.toHaveBeenCalled();
 		expect(wrapper.find(".approval-table").exists()).toBe(true);
@@ -199,6 +204,45 @@ describe("ApprovalCard for customisations", () => {
 		expect(text).not.toContain("x1");
 	});
 
+	it("shows a transition's condition as code below the table, not in it", () => {
+		const transitions = [
+			{ state: "Draft", action: "Submit", next_state: "Pending" },
+			{ state: "Pending", action: "Approve", next_state: "Approved", condition: "doc.grand_total < 1000" },
+		];
+		const block = { id: "t7", tool_name: "update_document", input: { doctype: "Workflow", name: "PO", data: { transitions } }, interrupts };
+		const wrapper = mount(ApprovalCard, { props: { block } });
+		const headers = wrapper.findAll("table.child-table th").map((th) => th.text());
+		expect(headers).not.toContain("Condition");
+		const code = wrapper.findAllComponents(CodePreview);
+		expect(code).toHaveLength(1);
+		expect(code[0].props("label")).toBe("Transitions, row 2: Condition");
+		expect(code[0].props("code")).toBe("doc.grand_total < 1000");
+		expect(code[0].props("language")).toBe("python");
+	});
+
+	it("shows a notification recipient's cc, bcc and condition as code", () => {
+		const recipients = [{ receiver_by_role: "Accounts Manager", cc: "{{ doc.owner }}", bcc: "", condition: "doc.priority == 'High'" }];
+		const block = { id: "t7", tool_name: "update_document", input: { doctype: "Notification", name: "N", data: { recipients } }, interrupts };
+		const wrapper = mount(ApprovalCard, { props: { block } });
+		const code = wrapper.findAllComponents(CodePreview).map((c) => [c.props("label"), c.props("language")]);
+		expect(code).toEqual([
+			["Recipients, row 1: Condition", "python"],
+			["Recipients, row 1: Cc", "django"],
+		]);
+		expect(wrapper.find("table.child-table").text()).toContain("Accounts Manager");
+	});
+
+	it("shows a print format's raw commands and layout as code", () => {
+		const data = { raw_printing: 1, raw_commands: "^XA^FD{{ doc.name }}^XZ", format_data: "[]" };
+		const block = { id: "t7", tool_name: "create_document", input: { doctype: "Print Format", data }, interrupts };
+		const wrapper = mount(ApprovalCard, { props: { block } });
+		const code = wrapper.findAllComponents(CodePreview).map((c) => [c.props("label"), c.props("language")]);
+		expect(code).toEqual([
+			["Raw Commands", "django"],
+			["Format Data", "json"],
+		]);
+	});
+
 	it("shows only ten child rows and counts the rest", () => {
 		const rows = Array.from({ length: 13 }, (_, i) => ({ state: `S${i}` }));
 		const block = { id: "t8", tool_name: "create_document", input: { doctype: "Workflow", data: { states: rows } }, interrupts };
@@ -245,6 +289,256 @@ describe("ApprovalCard for customisations", () => {
 	});
 });
 
+describe("ApprovalCard switching code on", () => {
+	const switchBlock = (doctype, data, name = "REC-1") => ({
+		id: "t10",
+		tool_name: "update_document",
+		input: { doctype, name, data },
+		interrupts,
+	});
+	const goesLive = (wrapper) => wrapper.find('[data-test="goes-live"]');
+
+	it("Client Script switched on: fetches the stored script and shows it as going live", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ script: "frappe.ui.form.on('Lead', {})" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Client Script", { enabled: 1 }) } });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Client Script", "REC-1", ["script"]);
+		expect(goesLive(wrapper).text()).toBe("This goes live");
+		expect(wrapper.find(".code-preview pre").text()).toContain("frappe.ui.form.on('Lead', {})");
+		expect(wrapper.find(".diff-add").exists()).toBe(false);
+	});
+
+	it("Server Script switched on with disabled 0: shows the stored script as going live", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ script: "frappe.db.delete('ToDo')" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Server Script", { disabled: "0" }) } });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Server Script", "REC-1", ["script"]);
+		expect(goesLive(wrapper).text()).toBe("This goes live");
+		expect(wrapper.find(".code-preview pre").text()).toContain("frappe.db.delete('ToDo')");
+	});
+
+	it("Notification switched on: shows its stored condition and message", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ condition: "doc.grand_total > 0", message: "<p>Hi {{ doc.name }}</p>" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Notification", { enabled: true }) } });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Notification", "REC-1", ["subject", "condition", "message"]);
+		const text = wrapper.findAll(".code-preview pre").map((p) => p.text()).join("\n");
+		expect(text).toContain("doc.grand_total > 0");
+		expect(text).toContain("Hi {{ doc.name }}");
+	});
+
+	it("FAC Page published: shows its stored html, script and style as going live", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ html: "<div id='planner'></div>", script: "renderPlanner()", style: ".planner { gap: 8px; }" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("FAC Page", { published: 1 }, "team-planner") } });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("FAC Page", "team-planner", ["html", "script", "style", "roles"]);
+		expect(goesLive(wrapper).text()).toBe("This goes live");
+		const text = wrapper.findAll(".code-preview pre").map((p) => p.text()).join("\n");
+		expect(text).toContain("<div id='planner'></div>");
+		expect(text).toContain("renderPlanner()");
+		expect(text).toContain(".planner { gap: 8px; }");
+	});
+
+	const preview = (wrapper, label) => wrapper.findAllComponents(CodePreview).find((c) => c.props("label") === label);
+
+	const publish = async (roles) => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ html: "<p>x</p>", script: "", style: "", roles });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("FAC Page", { published: 1 }, "team-planner") } });
+		await flushPromises();
+		return wrapper;
+	};
+	const audience = (wrapper) => wrapper.find('[data-test="goes-live-audience"]');
+	const roles = (wrapper) => audience(wrapper).findAll(".role-chip").map((chip) => chip.text());
+	const everyone = (wrapper) => wrapper.find('[data-test="goes-live-everyone"]');
+
+	it("FAC Page published: says which roles it goes live to", async () => {
+		const wrapper = await publish(["Sales User", "Report Manager"]);
+		expect(audience(wrapper).find(".goes-live-label").text()).toBe("Goes live to");
+		expect(roles(wrapper)).toEqual(["Sales User", "Report Manager"]);
+		expect(everyone(wrapper).exists()).toBe(false);
+	});
+
+	it("FAC Page published with no code and no roles: says (empty) and raises no load error", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ html: "", script: "", style: "", roles: [] });
+		const empty = mount(ApprovalCard, { props: { block: switchBlock("FAC Page", { published: 1 }, "team-planner") } });
+		await flushPromises();
+		expect(empty.find('[data-test="goes-live-empty"]').text()).toBe("(empty)");
+		expect(empty.find('[data-test="goes-live-missing"]').exists()).toBe(false);
+		expect(roles(empty)).toEqual(["System Managers only"]);
+	});
+
+	it("FAC Page published with no roles: says System Managers only", async () => {
+		const wrapper = await publish([]);
+		expect(roles(wrapper)).toEqual(["System Managers only"]);
+	});
+
+	it.each([["All"], ["Guest"]])("FAC Page published to %s: names it and warns it reaches every user", async (role) => {
+		const wrapper = await publish(["Sales User", role]);
+		expect(roles(wrapper)).toEqual(["Sales User", role]);
+		expect(everyone(wrapper).text()).toBe("All and Guest include every user who can log in.");
+	});
+
+	it("an update that also sets the roles shows them as the change, not the stored ones", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ html: "", script: "", style: "", roles: [] });
+		const wrapper = mount(ApprovalCard, {
+			props: { block: switchBlock("FAC Page", { published: 1, roles: [{ role: "Sales User" }] }, "team-planner") },
+		});
+		await flushPromises();
+		expect(audience(wrapper).exists()).toBe(false);
+		expect(wrapper.text()).toContain("Sales User");
+	});
+
+	it("FAC Page style change: shows style as a diffed CSS code block, not a plain field", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ style: ".a {}\n.old {}" });
+		const wrapper = mount(ApprovalCard, {
+			props: { block: switchBlock("FAC Page", { style: ".a {}\n.new {}" }, "team-planner") },
+		});
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("FAC Page", "team-planner", ["style"]);
+		expect(preview(wrapper, "Style").props("language")).toBe("css");
+		expect(wrapper.find(".diff-del").text()).toContain(".old {}");
+		expect(wrapper.find(".diff-add").text()).toContain(".new {}");
+		expect(wrapper.findAll(".field-key").map((k) => k.text())).not.toContain("Style");
+	});
+
+	it("FAC Page published with a style change: diffs the style and shows the stored html and script", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ style: ".old {}", html: "<div id='planner'></div>", script: "renderPlanner()" });
+		const wrapper = mount(ApprovalCard, {
+			props: { block: switchBlock("FAC Page", { published: 1, style: ".new {}" }, "team-planner") },
+		});
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("FAC Page", "team-planner", ["style", "html", "script", "roles"]);
+		expect(goesLive(wrapper).text()).toBe("This goes live");
+		expect(wrapper.find(".diff-del").text()).toContain(".old {}");
+		expect(wrapper.find(".diff-add").text()).toContain(".new {}");
+		const text = wrapper.findAll(".code-preview pre").map((p) => p.text()).join("\n");
+		expect(text).toContain("<div id='planner'></div>");
+		expect(text).toContain("renderPlanner()");
+	});
+
+	it("style on any other doctype stays a plain field", async () => {
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Web Page", { style: ".x {}" }) } });
+		await flushPromises();
+		expect(preview(wrapper, "Style")).toBeUndefined();
+		expect(currentCode).not.toHaveBeenCalled();
+	});
+
+	it("switch on that also changes the code keeps the diff and still says it goes live", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ script: "a\nold\nc" });
+		const wrapper = mount(ApprovalCard, {
+			props: { block: switchBlock("Server Script", { disabled: 0, script: "a\nnew\nc" }) },
+		});
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Server Script", "REC-1", ["script"]);
+		expect(goesLive(wrapper).text()).toBe("This goes live");
+		expect(wrapper.findAll(".code-preview")).toHaveLength(1);
+		expect(wrapper.find(".diff-del").text()).toContain("old");
+		expect(wrapper.find(".diff-add").text()).toContain("new");
+	});
+
+	it("says the code could not be loaded when the stored code cannot be fetched", async () => {
+		currentCode.mockReset();
+		currentCode.mockRejectedValue(new Error("denied"));
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Client Script", { enabled: "1" }) } });
+		await flushPromises();
+		expect(goesLive(wrapper).text()).toBe("This goes live");
+		expect(wrapper.find('[data-test="goes-live-missing"]').text()).toBe(
+			"Couldn't load the code that goes live. Check it in Desk before approving.",
+		);
+	});
+
+	it("keeps Approve disabled while the code that goes live loads", async () => {
+		let resolve;
+		currentCode.mockReset();
+		currentCode.mockReturnValue(new Promise((r) => (resolve = r)));
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Client Script", { enabled: 1 }) } });
+		await flushPromises();
+		expect(wrapper.find('[data-test="goes-live-loading"]').text()).toBe("Loading the code that goes live…");
+		expect(wrapper.find(".ql-btn-approve").attributes("disabled")).toBeDefined();
+		resolve({ script: "console.log(1)" });
+		await flushPromises();
+		expect(wrapper.find('[data-test="goes-live-loading"]').exists()).toBe(false);
+		expect(wrapper.find(".ql-btn-approve").attributes("disabled")).toBeUndefined();
+	});
+
+	it("leaves Approve enabled beside the notice when the stored code cannot be fetched", async () => {
+		currentCode.mockReset();
+		currentCode.mockRejectedValue(new Error("denied"));
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Server Script", { disabled: 0 }) } });
+		await flushPromises();
+		expect(wrapper.find('[data-test="goes-live-missing"]').exists()).toBe(true);
+		expect(wrapper.find(".ql-btn-approve").attributes("disabled")).toBeUndefined();
+	});
+
+	it("Notification switched on: shows its stored subject", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ subject: "Order {{ doc.name }} approved", condition: "", message: "" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Notification", { enabled: 1 }) } });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Notification", "REC-1", ["subject", "condition", "message"]);
+		expect(wrapper.find(".code-preview pre").text()).toContain("Order {{ doc.name }} approved");
+	});
+
+	it.each([[""], [null], [" 0 "], [0.4], ["1abc"], ["Infinity"]])("Server Script disabled %j is not canonical, so the card shows the code", async (value) => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ script: "x = 1" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Server Script", { disabled: value }) } });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Server Script", "REC-1", ["script"]);
+		expect(goesLive(wrapper).exists()).toBe(true);
+	});
+
+	it.each([["2"], [" 1 "], ["1.5"], [" 0 "], ["abc"]])("Client Script enabled %j is not canonical, so the card shows the code", async (value) => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ script: "x" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Client Script", { enabled: value }) } });
+		await flushPromises();
+		expect(goesLive(wrapper).exists()).toBe(true);
+	});
+
+	it("says (empty) when every stored field that goes live is empty", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ script: "" });
+		const wrapper = mount(ApprovalCard, { props: { block: switchBlock("Client Script", { enabled: 1 }) } });
+		await flushPromises();
+		expect(wrapper.find('[data-test="goes-live-empty"]').text()).toBe("(empty)");
+		expect(wrapper.find(".code-preview").exists()).toBe(false);
+	});
+
+	it("an update that does not switch on makes no extra fetch and shows no go-live label", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({});
+		for (const block of [
+			switchBlock("Client Script", { enabled: 0 }),
+			switchBlock("Server Script", { disabled: 1 }),
+			switchBlock("Notification", { enabled: "0" }),
+			switchBlock("Server Script", { disabled: "1" }),
+			switchBlock("Server Script", { disabled: true }),
+			switchBlock("Client Script", { enabled: false }),
+			switchBlock("FAC Page", { published: 0 }),
+			switchBlock("FAC Page", { title: "Planner" }),
+			switchBlock("Server Script", { script_type: "API" }),
+			switchBlock("Client Script", { dt: "Lead" }),
+			switchBlock("ToDo", { enabled: 1 }),
+		]) {
+			const wrapper = mount(ApprovalCard, { props: { block } });
+			await flushPromises();
+			expect(goesLive(wrapper).exists()).toBe(false);
+		}
+		expect(currentCode).not.toHaveBeenCalled();
+	});
+});
+
 describe("ApprovalCard plain-language copy and trust", () => {
 	const customisationInterrupts = [{ id: "i1", reason: { risk: "customisation" } }];
 
@@ -270,8 +564,9 @@ describe("ApprovalCard plain-language copy and trust", () => {
 	it("rename update card flags the rename and does not list it as a change", () => {
 		const input = { doctype: "Server Script", name: "Old Script", data: { name: "New Script", script: "pass" } };
 		const wrapper = mount(ApprovalCard, { props: { block: { id: "c6", tool_name: "update_document", input, interrupts } } });
-		const rows = wrapper.findAll(".field-key").map((k) => k.text());
-		expect(rows).toEqual(["Doctype", "Name"]);
+		// The title names the record ("Update Server Script Old Script"), so no rows repeat it.
+		expect(wrapper.find(".approval-title").text()).toBe("Update Server Script Old Script");
+		expect(wrapper.findAll(".field-key").map((k) => k.text())).toEqual([]);
 		expect(wrapper.text()).not.toContain("New Script");
 		expect(wrapper.find("[data-test='rename-notice']").text()).toBe(
 			"Renaming isn't possible here. Only the other changes will be saved.",
@@ -285,7 +580,7 @@ describe("ApprovalCard plain-language copy and trust", () => {
 	])("flags a rename sent as %s on a prefixed update tool", (_label, input) => {
 		const wrapper = mount(ApprovalCard, { props: { block: { id: "c7", tool_name: "erp_update_document", input, interrupts } } });
 		expect(wrapper.find("[data-test='rename-notice']").exists()).toBe(true);
-		expect(wrapper.findAll(".field-key").map((k) => k.text())).toEqual(["Doctype", "Name", "Desk Access"]);
+		expect(wrapper.findAll(".field-key").map((k) => k.text())).toEqual(["Desk Access"]);
 	});
 
 	it("shows no rename notice when the update restates the same name or does not rename", () => {
@@ -305,7 +600,7 @@ describe("ApprovalCard plain-language copy and trust", () => {
 	it("trust checkbox shown otherwise", () => {
 		const block = { id: "c3", tool_name: "create_document", input: { doctype: "ToDo", data: {} }, interrupts: [{ id: "i1", reason: { risk: "other" } }] };
 		const wrapper = mount(ApprovalCard, { props: { block } });
-		expect(wrapper.find(".trust-choice").text()).toBe("Don't ask again for this tool");
+		expect(wrapper.find(".trust-choice").text()).toBe("Don't ask again when FACO creates records");
 	});
 });
 
@@ -372,29 +667,42 @@ describe("ApprovalCard field conditions", () => {
 		mount(ApprovalCard, { props: { block: { id: "d1", tool_name: tool, input, interrupts } } });
 	const conditionInput = { doctype: "Custom Field", data: { dt: "Sales Order", depends_on: "eval:doc.base_grand_total > 100000" } };
 
-	it("Custom Field create: sentence in the row, raw expression only under the toggle, and the notice", async () => {
+	it("Custom Field create: an eval: condition shows as code under its sentence, with the notice", async () => {
 		const wrapper = card(conditionInput);
 		await flushPromises();
-		expect(wrapper.text()).toContain("when Base Grand Total is over 100000");
+		const code = wrapper.findComponent(CodePreview);
+		expect(code.props("label")).toBe("Depends On: when Base Grand Total is over 100000");
+		expect(code.props("code")).toBe("eval:doc.base_grand_total > 100000");
+		expect(code.props("language")).toBe("javascript");
 		expect(wrapper.text()).toContain(NOTICE);
-		expect(wrapper.text()).not.toContain("eval:doc");
-		await wrapper.find(".condition-toggle").trigger("click");
-		expect(wrapper.find(".condition-code").text()).toBe("eval:doc.base_grand_total > 100000");
+		expect(wrapper.find(".condition-toggle").exists()).toBe(false);
 	});
 
-	it("shows a condition sentence in the normal font", async () => {
-		const wrapper = card(conditionInput);
+	it("shows a bare fieldname condition as a sentence in the normal font", async () => {
+		const wrapper = card({ doctype: "Custom Field", data: { dt: "Sales Order", depends_on: "customer" } });
 		await flushPromises();
+		expect(wrapper.find(".code-preview").exists()).toBe(false);
 		const value = wrapper.findAll(".field-value").find((v) => v.find(".condition-value").exists());
 		expect(value.classes()).not.toContain("value-mono");
 		expect(value.classes()).not.toContain("value-money");
 	});
 
-	it("falls back to 'Has a condition' for an expression it cannot read", async () => {
+	it("falls back to 'Has a condition' for an expression it cannot read, and still shows the code", async () => {
 		const wrapper = card({ doctype: "Custom Field", data: { dt: "Sales Order", depends_on: "eval:doc.a > 1 && doc.b" } });
 		await flushPromises();
-		expect(wrapper.find(".condition-value").text()).toContain("Has a condition");
-		expect(wrapper.text()).not.toContain("doc.a > 1");
+		const code = wrapper.findComponent(CodePreview);
+		expect(code.props("label")).toBe("Depends On: Has a condition");
+		expect(code.props("code")).toBe("eval:doc.a > 1 && doc.b");
+	});
+
+	it("Custom Field update diffs its eval: condition against the stored one", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ depends_on: "eval:doc.qty > 1" });
+		const wrapper = card({ doctype: "Custom Field", name: "Sales Order-po", data: { depends_on: "eval:doc.qty > 5" } }, "update_document");
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Custom Field", "Sales Order-po", ["depends_on"]);
+		expect(wrapper.find(".diff-del").text()).toContain("doc.qty > 1");
+		expect(wrapper.find(".diff-add").text()).toContain("doc.qty > 5");
 	});
 
 	it("Custom Field update carries the notice", async () => {
@@ -404,12 +712,19 @@ describe("ApprovalCard field conditions", () => {
 		expect(wrapper.text()).toContain("when Qty is set");
 	});
 
-	it("Property Setter carries the notice and reads its value as a sentence", async () => {
+	it("Property Setter carries the notice and shows its eval: value as code under its sentence", async () => {
 		const wrapper = card({ doctype: "Property Setter", data: { doc_type: "Sales Order", property: "read_only_depends_on", value: "eval:doc.status == 'Closed'" } });
 		await flushPromises();
 		expect(wrapper.find('[data-test="condition-notice"]').text()).toBe(NOTICE);
-		expect(wrapper.text()).toContain("when Status is Closed");
-		expect(wrapper.text()).not.toContain("eval:doc");
+		const code = wrapper.findComponent(CodePreview);
+		expect(code.props("label")).toBe("Value: when Status is Closed");
+		expect(code.props("code")).toBe("eval:doc.status == 'Closed'");
+	});
+
+	it("Property Setter value for another property stays a plain field", async () => {
+		const wrapper = card({ doctype: "Property Setter", data: { doc_type: "Sales Order", property: "label", value: "eval:x" } });
+		await flushPromises();
+		expect(wrapper.find(".code-preview").exists()).toBe(false);
 	});
 
 	it("a write that sets no condition has no notice", async () => {
@@ -417,5 +732,157 @@ describe("ApprovalCard field conditions", () => {
 		await flushPromises();
 		expect(wrapper.find('[data-test="condition-notice"]').exists()).toBe(false);
 		expect(wrapper.find(".condition-toggle").exists()).toBe(false);
+	});
+});
+
+describe("ApprovalCard heading and progress", () => {
+	const todo = { id: "h1", tool_name: "create_document", input: { doctype: "ToDo", data: { description: "Call Blue Harbor", priority: "High" } }, interrupts };
+
+	it("leads with what FACO wants to do, from the arguments", () => {
+		const wrapper = mount(ApprovalCard, { props: { block: todo } });
+		expect(wrapper.find(".approval-title").text()).toBe("Create ToDo “Call Blue Harbor”");
+		expect(wrapper.find('[data-test="ix-waiting"]').exists()).toBe(true);
+	});
+
+	it("shows Approving… on the button that was clicked while the decision is sent", async () => {
+		const wrapper = mount(ApprovalCard, { props: { block: todo } });
+		await wrapper.find(".ql-btn-approve").trigger("click");
+		// The parent sets submitting once it starts sending the decision.
+		await wrapper.setProps({ submitting: true });
+		const approve = wrapper.find(".ql-btn-approve");
+		expect(approve.text()).toBe("Approving…");
+		expect(approve.attributes("aria-busy")).toBe("true");
+		expect(wrapper.find(".ql-btn-reject").attributes("aria-busy")).toBeUndefined();
+	});
+
+	it("drops the waiting signal once decided", () => {
+		const wrapper = mount(ApprovalCard, { props: { block: { ...todo, decision: { resolution: "approved" } } } });
+		expect(wrapper.find('[data-test="ix-waiting"]').exists()).toBe(false);
+		expect(wrapper.find(".decided-label").text()).toBe("Approved");
+	});
+});
+
+describe("ApprovalCard blank values", () => {
+	it("leaves out a blank field on an action, but keeps one an update clears", () => {
+		const action = mount(ApprovalCard, {
+			props: { block: { id: "b1", tool_name: "document_action", input: { doctype: "Sales Order", name: "SO-1", action: "submit", reason: "" }, interrupts } },
+		});
+		expect(action.findAll(".field-key").map((k) => k.text())).toEqual([]);
+		const update = mount(ApprovalCard, {
+			props: { block: { id: "b2", tool_name: "update_document", input: { doctype: "ToDo", name: "TD-1", data: { description: "" } }, interrupts } },
+		});
+		expect(update.findAll(".field-key").map((k) => k.text())).toEqual(["Description"]);
+	});
+});
+
+describe("ApprovalCard code in child rows and HTML fields", () => {
+	const OPEN = "eval:doc.status == 'Open'";
+	const update = (doctype, name, data) =>
+		mount(ApprovalCard, { props: { block: { id: "r1", tool_name: "update_document", input: { doctype, name, data }, interrupts } } });
+
+	it("diffs a transition's condition against the stored row", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({
+			transitions: [{ name: "t1", state: "Pending", action: "Approve", next_state: "Approved", condition: "doc.total < 1000" }],
+		});
+		const wrapper = update("Workflow", "PO", { transitions: [{ name: "t1", condition: "doc.total < 5000" }] });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Workflow", "PO", ["transitions"]);
+		const code = wrapper.findComponent(CodePreview);
+		expect(code.props("previous")).toBe("doc.total < 1000");
+		expect(wrapper.find(".diff-del").text()).toContain("doc.total < 1000");
+		expect(wrapper.find(".diff-add").text()).toContain("doc.total < 5000");
+	});
+
+	it("diffs a DocType field's eval: condition by fieldname, and keeps a bare one in the table", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({
+			fields: [{ name: "f1", fieldname: "notes", fieldtype: "Data", depends_on: OPEN, mandatory_depends_on: "", read_only_depends_on: "", options: "" }],
+		});
+		const fields = [
+			{ fieldname: "notes", fieldtype: "Data", depends_on: "eval:doc.status == 'Closed'" },
+			{ fieldname: "summary", fieldtype: "Data", depends_on: "status" },
+		];
+		const wrapper = update("DocType", "Visit", { fields });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("DocType", "Visit", ["fields"]);
+		const code = wrapper.findAllComponents(CodePreview);
+		expect(code.map((c) => c.props("label"))).toEqual(["Fields, row 1: Depends On"]);
+		expect(wrapper.find(".diff-del").text()).toContain("'Open'");
+		expect(wrapper.find(".diff-add").text()).toContain("'Closed'");
+		const table = wrapper.find("table.child-table").text();
+		expect(table).toContain("status");
+		expect(table).not.toContain("eval:");
+	});
+
+	it("diffs a Custom Field's HTML markup against the stored one", async () => {
+		currentCode.mockReset();
+		currentCode.mockResolvedValue({ options: "<b>old</b>" });
+		const wrapper = update("Custom Field", "ToDo-banner", { options: "<b>new</b>" });
+		await flushPromises();
+		expect(currentCode).toHaveBeenCalledWith("Custom Field", "ToDo-banner", ["options"]);
+		expect(wrapper.find(".diff-del").text()).toContain("old");
+		expect(wrapper.find(".diff-add").text()).toContain("new");
+	});
+
+	it("keeps a Custom Field's or Property Setter's plain options out of the code", async () => {
+		const select = update("Custom Field", "ToDo-kind", { options: "Open\nClosed" });
+		const link = update("Property Setter", "ToDo-ref-options", { property: "options", value: "Customer" });
+		const markup = update("Property Setter", "File-preview_html-options", { property: "options", value: "<i>{{ doc.name }}</i>" });
+		await flushPromises();
+		expect(select.find(".code-preview").exists()).toBe(false);
+		expect(link.find(".code-preview").exists()).toBe(false);
+		expect(markup.findComponent(CodePreview).props("language")).toBe("xml");
+	});
+});
+
+describe("ApprovalCard opening a dormant DocType", () => {
+	const card = (tool, input) =>
+		mount(ApprovalCard, { props: { block: { id: "o1", tool_name: tool, input, interrupts } } });
+	const entries = [
+		{ source: "Custom Field", name: "Site Visit-region", field: "region", key: "depends_on", code: "eval:doc.status == 'Open'" },
+		{ source: "Custom Field", name: "Site Visit-banner", field: "banner", key: "options", code: "<div>{{ doc.status }}</div>" },
+	];
+
+	it("lists each Custom Field's code when a permission opens the DocType", async () => {
+		codeGoingLive.mockResolvedValue(entries);
+		const wrapper = card("create_document", { doctype: "Custom DocPerm", data: { parent: "Site Visit", role: "Employee" } });
+		await flushPromises();
+		expect(codeGoingLive).toHaveBeenCalledWith({ target: "Site Visit" });
+		const section = wrapper.find('[data-test="opening-code"]');
+		expect(section.exists()).toBe(true);
+		const code = section.findAllComponents(CodePreview).map((c) => [c.props("label"), c.props("code")]);
+		expect(code).toEqual([
+			["Custom Field region: Depends On", "eval:doc.status == 'Open'"],
+			["Custom Field banner: Options", "<div>{{ doc.status }}</div>"],
+		]);
+	});
+
+	it("asks about a DocType role change, and blocks approval until the code loads", async () => {
+		let resolve;
+		codeGoingLive.mockReturnValue(new Promise((r) => (resolve = r)));
+		const wrapper = card("update_document", { doctype: "DocType", name: "Site Visit", data: { permissions: [{ role: "Employee" }] } });
+		await flushPromises();
+		expect(codeGoingLive).toHaveBeenCalledWith({ target: "Site Visit" });
+		expect(wrapper.find('[data-test="opening-code-loading"]').exists()).toBe(true);
+		const approve = wrapper.findAll("button").find((b) => b.text().includes("Approve"));
+		expect(approve.attributes("disabled")).toBeDefined();
+		resolve(entries);
+		await flushPromises();
+		expect(wrapper.find('[data-test="opening-code-loading"]').exists()).toBe(false);
+		expect(wrapper.find('[data-test="opening-code"]').findAllComponents(CodePreview)).toHaveLength(2);
+	});
+
+	it("warns when the code cannot be loaded, and shows nothing for a DocType with no code going live", async () => {
+		codeGoingLive.mockRejectedValue(new Error("denied"));
+		const failed = card("update_document", { doctype: "Custom DocPerm", name: "p1", data: { role: "Employee" } });
+		await flushPromises();
+		expect(codeGoingLive).toHaveBeenCalledWith({ customDocperm: "p1" });
+		expect(failed.find('[data-test="opening-code-missing"]').exists()).toBe(true);
+		codeGoingLive.mockReset();
+		codeGoingLive.mockResolvedValue([]);
+		const empty = card("create_document", { doctype: "Custom DocPerm", data: { parent: "Plain", role: "Employee" } });
+		await flushPromises();
+		expect(empty.find('[data-test="opening-code"]').exists()).toBe(false);
 	});
 });

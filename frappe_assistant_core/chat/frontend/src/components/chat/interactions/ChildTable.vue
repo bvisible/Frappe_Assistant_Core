@@ -38,7 +38,8 @@ const columns = computed(() => {
 	const seen = new Set();
 	for (const row of shownRows.value) {
 		for (const [key, value] of Object.entries(row)) {
-			if (!SKIPPED_COLUMNS.has(key) && (value === null || typeof value !== "object")) seen.add(key);
+			if (SKIPPED_COLUMNS.has(key)) continue;
+			if (value === null || typeof value !== "object") seen.add(key);
 		}
 	}
 	return [...seen];
