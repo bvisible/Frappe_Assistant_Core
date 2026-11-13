@@ -45,18 +45,21 @@ mcp = MCPServer(_get_mcp_server_name())
 def _check_assistant_enabled(user: str) -> bool:
     """Check if assistant is enabled for user."""
     try:
-        # //// Neoffice — desk users only. `assistant_enabled` is a Custom Field whose default is 1, so every new account
-        # //// had it, a portal customer (Website User) included: with an API key or an OAuth token it opened the MCP
-        # //// server and its tools, and the chat seat (chat/api/auth.py and settings/access.py call this too). Our auth
-        # //// hook (utils/neoffice_guard.py) left the MCP endpoint to this check. Remove when upstream checks the type.
-        if frappe.db.get_value("User", user, "user_type") != "System User":
-            return False
         assistant_enabled = frappe.db.get_value("User", user, "assistant_enabled")
         if assistant_enabled is None:
             return False
         return bool(int(assistant_enabled)) if assistant_enabled else False
     except Exception:
         return False
+
+
+# //// Neoffice — added function (no upstream equivalent): whether the account is a desk user. The MCP endpoint
+# //// refuses any other (#2664): `assistant_enabled` is a Custom Field whose default is 1, so every new account has
+# //// it, a portal customer (Website User) included, who with an API key or an OAuth token opened the MCP server
+# //// and its tools. The chat's endpoints are closed to such an account by our auth hook (utils/neoffice_guard.py),
+# //// which leaves the MCP endpoint to its own checks. Remove when upstream checks the user type.
+def _is_desk_user(user: str) -> bool:
+    return frappe.db.get_value("User", user, "user_type") == "System User"
 
 
 # Only these JSON-RPC methods touch a tool, so only they need the registry built.
@@ -424,7 +427,8 @@ def handle_mcp():
     frappe.local.ar_client_type = frappe.request.headers.get("X-AR-Client-Type") or None
 
     # Check if user has assistant access enabled
-    if not _check_assistant_enabled(authenticated_user):
+    # //// Neoffice — a portal account never reaches the MCP server, whatever its assistant flag (see _is_desk_user).
+    if not _is_desk_user(authenticated_user) or not _check_assistant_enabled(authenticated_user):
         frappe.throw(
             _("Assistant access is disabled for user {0}").format(authenticated_user), frappe.PermissionError
         )

@@ -237,10 +237,6 @@ def _check_assistant_enabled(user: str) -> bool:
         bool: True if assistant is enabled, False otherwise
     """
     try:
-        # //// Neoffice — desk users only, as in fac_endpoint._check_assistant_enabled: the field defaults to 1 for every
-        # //// account, a portal customer (Website User) included.
-        if frappe.db.get_value("User", user, "user_type") != "System User":
-            return False
         # Get the assistant_enabled field value for the user
         assistant_enabled = frappe.db.get_value("User", user, "assistant_enabled")
 

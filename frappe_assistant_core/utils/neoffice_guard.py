@@ -4,8 +4,8 @@
 # //// create projects on a site where chat is switched off, read the day's tool usage, the health check (which
 # //// names the database) and the prompt library. Neoffice keeps all of it for desk users: this auth hook refuses a
 # //// Website User on every whitelisted method of the app except the MCP endpoint (api/fac_endpoint.handle_mcp,
-# //// which authenticates and refuses a non-desk account itself, in _check_assistant_enabled: `assistant_enabled`
-# //// alone defaults to 1 for every account, 13.11.2026) and the methods upstream declares guest-callable
+# //// which authenticates and refuses a non-desk account itself, fac_endpoint._is_desk_user: `assistant_enabled`
+# //// alone defaults to 1 for every account, #2664) and the methods upstream declares guest-callable
 # //// (discovery, OAuth, can_use_faco). Remove it when upstream gates those endpoints on the user type.
 """auth hook: FAC endpoints other than the MCP endpoint are for desk users only."""
 
