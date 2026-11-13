@@ -43,10 +43,19 @@ def _impact(tool: str, doctype: str, data: dict | None = None, name: str | None 
     return customisation_impact(tool, tool_input)
 
 
+# //// Neoffice — added function (no upstream equivalent). These tests take Console Log as a DocType nothing points at;
+# //// our ERPNext fork's Setup workspace links it (Workspace Link), which made it "in use" on our CI. The link is
+# //// removed inside the class's transaction, which rolls it back.
+def _unlink_console_log_from_workspaces():
+    frappe.db.delete("Workspace Link", {"link_type": "DocType", "link_to": "Console Log"})
+    frappe.db.delete("Workspace Shortcut", {"type": "DocType", "link_to": "Console Log"})
+
+
 class TestCustomisationImpact(BaseAssistantTest):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        _unlink_console_log_from_workspaces()  # //// Neoffice — see the function.
         # Production reaches these rows when a user saves a Server Script switched off or on. A
         # direct insert is enough: the server-script guard is a tool-level check, not a doc hook.
         # Rolled back with the class-level transaction.
@@ -656,6 +665,12 @@ class TestCustomisationImpact(BaseAssistantTest):
 
 class TestDocTypeReferences(BaseAssistantTest):
     """A custom DocType that a record other people open points at is in use, so never dormant."""
+
+    # //// Neoffice — see _unlink_console_log_from_workspaces.
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        _unlink_console_log_from_workspaces()
 
     def test_a_record_others_open_that_points_at_the_doctype_makes_it_live(self):
         # Production reaches each reference when a builder adds a Connections link on another form,
